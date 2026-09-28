@@ -4118,11 +4118,12 @@ ${inRangeHands.map(h => `${h} ${Number.isInteger(handMax[h]) ? handMax[h] : pars
       throw new Error('AI 返回 JSON 不是对象');
     }
 
-    // Update rangeOverrides based on AI's per-hand counts.
+    // Update rangeOverrides + tableUsed based on AI's per-hand counts.
     // - count === 0: remove from range (treat as fold)
-    // - count === max: remove override (use theoretical)
-    // - 0 < count < max: set override
+    // - count === max: don't override (use current effective max as-is), still mark used
+    // - 0 < count < max: set override + mark used
     state.rangeOverrides = {};
+    state.tableUsed = {};
     let updated = 0;
     let removed = 0;
     let kept = 0;
@@ -4135,11 +4136,11 @@ ${inRangeHands.map(h => `${h} ${Number.isInteger(handMax[h]) ? handMax[h] : pars
       if (n === 0) {
         delete state.tableRange[h];
         removed++;
-      } else if (Math.abs(n - comboCount(h)) < 1e-9) {
-        // AI returned the full theoretical count — clear any override
-        kept++;
       } else {
-        state.rangeOverrides[h] = n;
+        if (Math.abs(n - max) > 1e-9) {
+          state.rangeOverrides[h] = n;
+        }
+        state.tableUsed[h] = true;
         kept++;
       }
       updated++;
