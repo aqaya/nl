@@ -328,6 +328,32 @@
     border-color: #fab1a0;
   }
   .sync-btn.danger:hover { background: #ffeaa7; }
+  .sync-btn.ai {
+    background: #6c5ce7;
+    color: #fff;
+    border-color: #5d4ad6;
+  }
+  .sync-btn.ai:hover { background: #5d4ad6; }
+  .sync-btn.ai:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #a29bfe;
+  }
+  .sync-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: #2d3436;
+    cursor: pointer;
+    user-select: none;
+  }
+  .sync-toggle input[type="checkbox"] {
+    cursor: pointer;
+    transform: scale(1.15);
+    margin: 0;
+  }
   .sync-btn.flash {
     animation: syncFlash 0.6s ease-out;
   }
@@ -350,8 +376,27 @@
     background: #fff;
   }
   .breakdown .hand-name { font-weight: 600; }
-  .breakdown td.count-cell { color: #636e72; font-size: 11px; }
+  .breakdown td.count-cell { color: #636e72; font-size: 11px; cursor: pointer; user-select: none; }
   .breakdown td.count-cell.in-range { color: #2d3436; }
+  .breakdown td.count-cell:active { cursor: grabbing; }
+  .breakdown td.count-cell.count-source {
+    outline: 2px solid #fdcb6e;
+    outline-offset: -2px;
+    background: rgba(253, 203, 110, 0.18);
+  }
+  .breakdown td.count-cell.count-dragover {
+    background: rgba(253, 203, 110, 0.32);
+    transition: background 0.25s ease-out;
+  }
+  .breakdown td.use-cell.use-source {
+    background: rgba(116, 185, 255, 0.18);
+  }
+  .breakdown td.use-cell.use-dragover {
+    background: rgba(116, 185, 255, 0.32);
+    transition: background 0.25s ease-out;
+  }
+  /* Compact view: hide fold cells within rows so removed hands fully disappear */
+  .breakdown .compact td.fold { display: none; }
 
   /* ===== Right: board & stats ===== */
   .right-col { display: flex; flex-direction: column; gap: 8px; }
@@ -1831,8 +1876,12 @@
         <button id="syncToGridBtn" class="sync-btn">➡ 推送本表到左侧</button>
         <button id="useAllTableBtn" class="sync-btn">✓ 使用所有</button>
         <button id="useNoneTableBtn" class="sync-btn">取消使用</button>
-        <button id="filterByUseTableBtn" class="sync-btn" title="取消未勾选'使用'的组合的选中状态（在范围内但未勾选的会从范围移除）">仅保留已勾选</button>
-        <button id="clearTableBtn" class="sync-btn danger">清空本表</button>
+        <button id="filterByUseTableBtn" class="sync-btn" title="取消未勾选'使用'的组合的选中状态（在范围内但未勾选的会从范围移除）">仅保留已勾选并移除其他</button>
+        <button id="aiRecommendTopBtn" class="sync-btn ai" title="调用 AI 分析当前范围与牌面结构，按牌力返回每个手牌应保留的组合数（JSON），写入组合数。AI 会保留同花听牌/顺听牌等听牌价值。">🤖 AI推荐前70%牌力</button>
+        <button id="clearTableBtn" class="sync-btn danger" title="reset：恢复全部 169 种手牌到本表范围内（默认动作 call），并清空所有已勾选项">reset</button>
+        <label class="sync-toggle" title="勾选后，组合数表中三列全是 fold 的行会被折叠隐藏（用于看清已被移除/未在范围的组合）">
+          <input type="checkbox" id="compactViewToggle" /> 仅显示在范围
+        </label>
       </div>
       <div id="autoSyncHint" style="font-size:11px; color:#00b894; width:100%; margin-top:2px; min-height:14px;"></div>
     </div>
@@ -1881,9 +1930,9 @@
         </div>
         <div style="display:flex; gap:4px; margin-top:6px;">
           <div style="display:flex; gap:4px; margin-top:6px; flex-wrap:wrap;">
-            <button id="randomFlopBtn" class="blocker-btn" style="flex:1;" title="为 flop (前三张) 各随机补一张牌。点击后此按钮锁定，需先清空才能再点。">🎲 Flop (3张)</button>
-            <button id="randomTurnBtn" class="blocker-btn" style="flex:1;" title="为 turn (第四张) 随机补一张牌。点击后此按钮锁定。">🎲 Turn (1张)</button>
-            <button id="randomRiverBtn" class="blocker-btn" style="flex:1;" title="为 river (第五张) 随机补一张牌。点击后此按钮锁定。">🎲 River (1张)</button>
+            <button id="randomFlopBtn" class="blocker-btn" style="flex:1;" title="为 flop (前三张) 随机生成牌。点击多次可重新生成（已满时会重新洗全部三张）。">🎲 Flop (3张)</button>
+            <button id="randomTurnBtn" class="blocker-btn" style="flex:1;" title="为 turn (第四张) 随机生成一张牌。点击多次可重新生成。">🎲 Turn (1张)</button>
+            <button id="randomRiverBtn" class="blocker-btn" style="flex:1;" title="为 river (第五张) 随机生成一张牌。点击多次可重新生成。">🎲 River (1张)</button>
           </div>
           <div style="display:flex; gap:4px; margin-top:4px;">
             <button id="clearBoardBtn" class="blocker-btn ghost" style="flex:1;">✕ 清空所有牌面</button>
@@ -1919,13 +1968,13 @@
     <div class="stats-section">
       <div class="section-header">使用中组合统计</div>
       <table class="stats-table">
-        <tr><th title="在中间表格里勾选了『使用』列的所有组合数（按理论权重计）。是 1326 的子集。">使用中组合数!</th><td><strong id="usedCount" style="color:#00b894; font-size:14px;">0</strong></td></tr>
-        <tr><th title="使用中组合数 + 未使用组合数 = 1326。始终等于范围内的总组合数（含 fold 的也计入）。">总组合数!</th><td id="totalCount">0</td></tr>
+        <tr><th title="在中间表格里勾选了『使用』列的所有组合数（按百分比折算后）。混合策略（如 raise:50）按比例计入。">使用中组合数!</th><td><strong id="usedCount" style="color:#00b894; font-size:14px;">0</strong></td></tr>
+        <tr><th title="范围内所有手牌的有效组合数（按百分比折算后 + 阻塞扣除）。= 使用中 + 未使用。">总组合数!</th><td id="totalCount">0</td></tr>
         <tr><th title="使用中组合数 / 总组合数。反映你当前激活范围占整体的比例。">使用占比!</th><td><strong id="usedPct" style="color:#74b9ff; font-size:14px;">-</strong></td></tr>
-        <tr><th title="已使用的对子组合数 / 范围内全部对子组合数（每个口袋对子理论 = 6 组合）。">对子使用 / 总!</th><td id="usedPairs">-</td></tr>
-        <tr><th title="已使用的同花组合数 / 范围内全部同花组合数（每个非同花同点理论 = 4 组合）。">同花使用 / 总!</th><td id="usedSuiteds">-</td></tr>
-        <tr><th title="已使用的异花组合数 / 范围内全部异花组合数（每个异花同点理论 = 12 组合）。">异花使用 / 总!</th><td id="usedOffs">-</td></tr>
-        <tr><th title="未在『使用』列勾选的组合数。= 总组合数 - 使用中组合数。">未使用组合数!</th><td id="exclCount" style="color:#d63031;">0</td></tr>
+        <tr><th title="已使用的对子组合数 / 范围内全部对子有效组合数（百分比折算后）。口袋对子理论 = 6 组合。">对子使用 / 总!</th><td id="usedPairs">-</td></tr>
+        <tr><th title="已使用的同花组合数 / 范围内全部同花有效组合数（百分比折算后）。同花理论 = 4 组合。">同花使用 / 总!</th><td id="usedSuiteds">-</td></tr>
+        <tr><th title="已使用的异花组合数 / 范围内全部异花有效组合数（百分比折算后）。异花理论 = 12 组合。">异花使用 / 总!</th><td id="usedOffs">-</td></tr>
+        <tr><th title="范围内已勾选但未标为『使用』的有效组合数。= 总组合数 - 使用中组合数。">未使用组合数!</th><td id="exclCount" style="color:#d63031;">0</td></tr>
       </table>
       <div style="font-size:10px; color:#888; margin-top:6px;">
         勾选中间表格的"使用"列标记正在使用中的手牌。每个对子 = 6 组合，同花 = 4，异花 = 12。
@@ -2445,6 +2494,7 @@ const state = {
   tableRange: {},       // middle table (independent) state
   rangeOverrides: {},
   tableUsed: {},        // checkbox-marked hands in middle table (checked = used)
+  tableCompact: false,  // when true, breakdown table hides rows whose all 3 hand cells are fold
   board: [null, null, null, null, null],
   stage: 'flop',
   currentAction: 'raise',
@@ -2456,6 +2506,8 @@ const state = {
   dragAction: null,         // action being applied during drag
   dragStart: null,          // {r,c} first cell of drag
   isDragging: false,
+  countDrag: null,          // breakdown count-drag: { active, sourceKey, sourceValue, startX, startY, moved }
+  useDrag: null,            // breakdown use-checkbox drag: { active, sourceKey, sourceChecked, startX, startY, moved }
 };
 
 function handKey(rowIdx, colIdx) {
@@ -2698,11 +2750,71 @@ document.addEventListener('mousemove', e => {
   lastMouseX = e.clientX;
   lastMouseY = e.clientY;
   onDocumentMouseMove(e);
+  onCountDragMouseMove(e);
+  onUseDragMouseMove(e);
 });
 document.addEventListener('mouseup', onDocumentMouseUp);
+document.addEventListener('mouseup', onCountDragMouseUp);
+document.addEventListener('mouseup', onUseDragMouseUp);
 document.addEventListener('mouseleave', () => {
   // don't end drag when leaving window
 });
+
+/* ----- Drag-paint breakdown count values ----- */
+function onCountDragMouseMove(e) {
+  const drag = state.countDrag;
+  if (!drag || !drag.active) return;
+  if (!drag.moved) {
+    const dx = Math.abs(e.clientX - drag.startX);
+    const dy = Math.abs(e.clientY - drag.startY);
+    if (dx < 4 && dy < 4) return;
+    drag.moved = true;
+  }
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  if (!target || !target.classList.contains('count-cell')) return;
+  const key = target.dataset.hand;
+  if (!key || key === drag.sourceKey) return;
+  applyCountDragToCell(key, drag.sourceValue);
+}
+
+function onCountDragMouseUp() {
+  const drag = state.countDrag;
+  if (!drag || !drag.active) return;
+  drag.active = false;
+  document.querySelectorAll('#breakdownBody td.count-cell.count-source')
+    .forEach(el => el.classList.remove('count-source'));
+  // Defer clearing so the trailing click event can still inspect `moved`
+  setTimeout(() => { if (state.countDrag && !state.countDrag.active) state.countDrag = null; }, 50);
+}
+
+/* ----- Drag-paint breakdown use-checkbox state ----- */
+function onUseDragMouseMove(e) {
+  const drag = state.useDrag;
+  if (!drag || !drag.active) return;
+  if (!drag.moved) {
+    const dx = Math.abs(e.clientX - drag.startX);
+    const dy = Math.abs(e.clientY - drag.startY);
+    if (dx < 4 && dy < 4) return;
+    drag.moved = true;
+  }
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  if (!target) return;
+  // target may be the checkbox itself or its wrapping td
+  const td = target.closest && target.closest('td.use-cell');
+  if (!td || !td.dataset.hand) return;
+  const key = td.dataset.hand;
+  if (key === drag.sourceKey) return;
+  applyUseDragToCell(key, drag.sourceChecked);
+}
+
+function onUseDragMouseUp() {
+  const drag = state.useDrag;
+  if (!drag || !drag.active) return;
+  drag.active = false;
+  document.querySelectorAll('#breakdownBody td.use-cell.use-source')
+    .forEach(el => el.classList.remove('use-source'));
+  setTimeout(() => { if (state.useDrag && !state.useDrag.active) state.useDrag = null; }, 50);
+}
 
 /* ----- Grid cell context menu ----- */
 function onCellContextMenu(e) {
@@ -2954,13 +3066,18 @@ function renderBreakdown() {
   const bd = buildBreakdown();
   const tbody = document.getElementById('breakdownBody');
   tbody.innerHTML = '';
+  const compact = !!state.tableCompact;
+  tbody.classList.toggle('compact', compact);
 
   const maxLen = Math.max(bd.pairs.length, bd.suiteds.length, bd.offs.length);
   const displayLen = Math.min(maxLen, 50);
+  const isFold = (it) => !it || !it.action || it.action === 'fold';
 
   for (let i = 0; i < displayLen; i++) {
-    const tr = document.createElement('tr');
     const p = bd.pairs[i], s = bd.suiteds[i], o = bd.offs[i];
+    // Compact mode: skip rows where all three columns are fold (or out of bounds)
+    if (compact && isFold(p) && isFold(s) && isFold(o)) continue;
+    const tr = document.createElement('tr');
     tr.appendChild(makeHandTd(p));
     tr.appendChild(makeCountTd(p));
     tr.appendChild(makeUseTd(p));
@@ -2978,13 +3095,13 @@ function renderBreakdown() {
   trow.style.background = '#f1f3f5';
   trow.innerHTML = `
     <td>${bd.pairs.filter(x=>x.action && x.action!=='fold').length} 种</td>
-    <td>${sumCombos(bd.pairs)}</td>
+    <td>${fmtCount(sumCombos(bd.pairs))}</td>
     <td></td>
     <td>${bd.suiteds.filter(x=>x.action && x.action!=='fold').length} 种</td>
-    <td>${sumCombos(bd.suiteds)}</td>
+    <td>${fmtCount(sumCombos(bd.suiteds))}</td>
     <td></td>
     <td>${bd.offs.filter(x=>x.action && x.action!=='fold').length} 种</td>
-    <td>${sumCombos(bd.offs)}</td>
+    <td>${fmtCount(sumCombos(bd.offs))}</td>
     <td></td>
   `;
   tbody.appendChild(trow);
@@ -2993,11 +3110,9 @@ function renderBreakdown() {
 
 function sumCombos(arr) {
   // Sum of combos currently marked as used, factoring in mixed-strategy percentages
+  // and any rangeOverrides (manual edit or blocker deduction)
   return arr.filter(x => x.action && x.action !== 'fold' && isUsed(x.key))
-            .reduce((s, x) => {
-              const pct = getActionPercent(x.action);
-              return s + (pct === null ? x.count : x.count * pct / 100);
-            }, 0);
+            .reduce((s, x) => s + effectiveCount(x), 0);
 }
 
 function isUsed(key) {
@@ -3009,10 +3124,12 @@ function makeUseTd(item) {
   const td = document.createElement('td');
   td.classList.add('use-cell');
   if (!item) return td;
+  td.dataset.hand = item.key;
   const inRange = item.action && item.action !== 'fold';
   if (!inRange) {
     td.style.color = '#ccc';
     td.textContent = '-';
+    td.classList.add('fold');
     return td;
   }
   const cb = document.createElement('input');
@@ -3021,18 +3138,46 @@ function makeUseTd(item) {
   cb.style.cursor = 'pointer';
   cb.style.transform = 'scale(1.3)';
   cb.title = cb.checked
-    ? `已标记 ${item.key} 为"使用中"，点击取消`
-    : `点击标记 ${item.key} 为"使用中"（计入使用占比）`;
-  cb.addEventListener('click', e => e.stopPropagation());
-  cb.addEventListener('mousedown', e => e.stopPropagation());
+    ? `已标记 ${item.key} 为"使用中"，点击取消 / 按住拖拽可批量应用此状态`
+    : `点击标记 ${item.key} 为"使用中"（计入使用占比）/ 按住拖拽可批量应用此状态`;
+  cb.addEventListener('click', e => {
+    e.stopPropagation();
+    // If a drag just happened on this checkbox, revert the native toggle and bail.
+    if (state.useDrag && state.useDrag.moved) {
+      e.preventDefault();
+      cb.checked = state.useDrag.sourceChecked;
+      return;
+    }
+  });
+  cb.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    state.useDrag = {
+      active: true,
+      sourceKey: item.key,
+      sourceChecked: cb.checked,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+    };
+    td.classList.add('use-source');
+  });
+  td.addEventListener('mouseenter', () => {
+    const drag = state.useDrag;
+    if (!drag || !drag.active) return;
+    if (!drag.moved) return;
+    if (drag.sourceKey === item.key) return;
+    applyUseDragToCell(item.key, drag.sourceChecked);
+  });
   cb.addEventListener('change', e => {
     e.stopPropagation();
     state.tableUsed = state.tableUsed || {};
     if (cb.checked) state.tableUsed[item.key] = true;
     else delete state.tableUsed[item.key];
     cb.title = cb.checked
-      ? `已标记 ${item.key} 为"使用中"，点击取消`
-      : `点击标记 ${item.key} 为"使用中"（计入使用占比）`;
+      ? `已标记 ${item.key} 为"使用中"，点击取消 / 按住拖拽可批量应用此状态`
+      : `点击标记 ${item.key} 为"使用中"（计入使用占比）/ 按住拖拽可批量应用此状态`;
     renderBreakdown();
     updateUseStats();
   });
@@ -3040,17 +3185,48 @@ function makeUseTd(item) {
   return td;
 }
 
+function applyUseDragToCell(key, sourceChecked) {
+  const cb = document.querySelector(`#breakdownBody td.use-cell[data-hand="${key}"] input[type=checkbox]`);
+  if (!cb) return;
+  if (cb.checked === sourceChecked) return;
+  cb.checked = sourceChecked;
+  state.tableUsed = state.tableUsed || {};
+  if (sourceChecked) state.tableUsed[key] = true;
+  else delete state.tableUsed[key];
+  cb.title = sourceChecked
+    ? `已标记 ${key} 为"使用中"，点击取消 / 按住拖拽可批量应用此状态`
+    : `点击标记 ${key} 为"使用中"（计入使用占比）/ 按住拖拽可批量应用此状态`;
+  const td = cb.closest('td.use-cell');
+  if (td) {
+    td.classList.add('use-dragover');
+    setTimeout(() => td.classList.remove('use-dragover'), 250);
+  }
+  updateUseStats();
+}
+
+function effectiveCount(item) {
+  const base = (state.rangeOverrides && state.rangeOverrides[item.key] !== undefined)
+    ? state.rangeOverrides[item.key]
+    : item.count;
+  const pct = getActionPercent(item.action);
+  return pct !== null ? base * pct / 100 : base;
+}
+
+function fmtCount(n) {
+  return parseFloat(n.toFixed(2));
+}
+
 function updateUseStats() {
   const bd = buildBreakdown();
   const all = [...bd.pairs, ...bd.suiteds, ...bd.offs];
   const inRange = all.filter(x => x.action && x.action !== 'fold');
-  const total = inRange.reduce((s, x) => s + x.count, 0);
-  const used = inRange.filter(x => isUsed(x.key)).reduce((s, x) => s + x.count, 0);
+  const total = inRange.reduce((s, x) => s + effectiveCount(x), 0);
+  const used = inRange.filter(x => isUsed(x.key)).reduce((s, x) => s + effectiveCount(x), 0);
   const pct = total ? Math.round(100 * used / total) : 0;
 
   // Per-type breakdown (each pair=6, suited=4, off=12)
-  const sumUsed   = arr => arr.filter(x => isUsed(x.key)).reduce((s, x) => s + x.count, 0);
-  const sumTotal  = arr => arr.filter(x => x.action && x.action !== 'fold').reduce((s, x) => s + x.count, 0);
+  const sumUsed   = arr => arr.filter(x => isUsed(x.key)).reduce((s, x) => s + effectiveCount(x), 0);
+  const sumTotal  = arr => arr.filter(x => x.action && x.action !== 'fold').reduce((s, x) => s + effectiveCount(x), 0);
   const usedPairs = sumUsed(bd.pairs);
   const totPairs  = sumTotal(bd.pairs);
   const usedSu    = sumUsed(bd.suiteds);
@@ -3066,13 +3242,13 @@ function updateUseStats() {
   const oEl     = document.getElementById('usedOffs');
   const exclEl  = document.getElementById('exclCount');
   if (!usedEl) return;
-  usedEl.textContent = used;
-  totalEl.textContent = total;
+  usedEl.textContent = fmtCount(used);
+  totalEl.textContent = fmtCount(total);
   pctEl.textContent = total ? (pct + '%') : '-';
-  pEl.textContent = `${usedPairs} / ${totPairs}`;
-  sEl.textContent = `${usedSu} / ${totSu}`;
-  oEl.textContent = `${usedOff} / ${totOff}`;
-  exclEl.textContent = total - used;
+  pEl.textContent = `${fmtCount(usedPairs)} / ${fmtCount(totPairs)}`;
+  sEl.textContent = `${fmtCount(usedSu)} / ${fmtCount(totSu)}`;
+  oEl.textContent = `${fmtCount(usedOff)} / ${fmtCount(totOff)}`;
+  exclEl.textContent = fmtCount(total - used);
 }
 
 function makeHandTd(item) {
@@ -3081,13 +3257,24 @@ function makeHandTd(item) {
   td.dataset.hand = item.key;
   const inRange = item.action && item.action !== 'fold';
   if (inRange) {
-    td.classList.add('in-range', 'action-' + item.action);
+    const pct = getActionPercent(item.action);
+    const baseAction = (item.action || '').split(':')[0] || item.action;
+    td.classList.add('in-range', 'action-' + baseAction);
     td.innerHTML = `<span class="hand-name">${item.key}</span>`;
+    if (pct !== null && pct < 100) {
+      const colors = { raise: '#74b9ff', call: '#fdcb6e', allin: '#d63031' };
+      const c = colors[baseAction] || '#74b9ff';
+      td.style.setProperty('background',
+        `linear-gradient(to right, ${c} ${pct}%, transparent ${pct}%)`, 'important');
+      td.title = `${item.key} - ${pct}% ${ACTION_LABEL[baseAction] || baseAction} / ${100 - pct}% 弃牌\n点击切换选中｜双击编辑｜右键菜单`;
+    } else {
+      td.title = `${item.key} - ${ACTION_LABEL[baseAction] || baseAction}\n点击切换选中｜双击编辑｜右键菜单`;
+    }
   } else {
     td.classList.add('fold');
     td.textContent = item.key;
+    td.title = `${item.key}\n点击切换选中｜双击编辑｜右键菜单`;
   }
-  td.title = `${item.key}\n点击切换选中｜双击编辑｜右键菜单`;
   td.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleHand(item.key);
@@ -3112,27 +3299,50 @@ function makeCountTd(item) {
   td.dataset.hand = item.key;
   const inRange = item.action && item.action !== 'fold';
   const override = state.rangeOverrides && state.rangeOverrides[item.key];
-  const displayCount = override !== undefined ? override : item.count;
+  const baseCount = override !== undefined ? override : item.count;
+  const pct = getActionPercent(item.action);
+  const displayCount = (pct !== null && pct < 100)
+    ? parseFloat((baseCount * pct / 100).toFixed(2))
+    : baseCount;
+  const baseLabel = pct !== null && pct < 100
+    ? `${displayCount} (${baseCount}×${pct}%)`
+    : String(displayCount);
 
   if (inRange) {
     td.classList.add('in-range');
     td.textContent = displayCount;
-    if (override !== undefined && override < item.count) {
-      // Show original count as strikethrough
-      const orig = document.createElement('span');
-      orig.style.cssText = 'font-size: 9px; color:#888; text-decoration: line-through; margin-left: 3px; font-weight: normal;';
-      orig.textContent = item.count;
-      td.appendChild(orig);
-      td.style.color = '#e17055';
-      td.style.fontWeight = 'bold';
-    }
   } else {
     td.textContent = displayCount;
+    td.classList.add('fold');
   }
-  // Allow editing count to represent blocker-aware combos
-  td.title = '可点击修改该手牌的有效组合数';
+  // Allow editing count to represent blocker-aware combos, or drag to apply to others
+  td.title = `${item.key} 组合数 = ${baseLabel}\n点击修改 · 按住向下拖拽可批量应用`;
+  td.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (!inRange) return;
+    e.preventDefault();
+    e.stopPropagation();
+    state.countDrag = {
+      active: true,
+      sourceKey: item.key,
+      sourceValue: displayCount,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+    };
+    td.classList.add('count-source');
+  });
+  td.addEventListener('mouseenter', () => {
+    const drag = state.countDrag;
+    if (!drag || !drag.active) return;
+    if (!inRange) return;
+    if (!drag.moved) return;
+    if (drag.sourceKey === item.key) return;
+    applyCountDragToCell(item.key, drag.sourceValue);
+  });
   td.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (state.countDrag && state.countDrag.moved) return;
     if (!state.tableRange[item.key] || state.tableRange[item.key] === 'fold') return;
     const cur = displayCount;
     const next = prompt(`设置 ${item.key} 的有效组合数（理论: ${item.count}）：`, cur);
@@ -3150,6 +3360,28 @@ function makeCountTd(item) {
     }
   });
   return td;
+}
+
+function applyCountDragToCell(key, sourceValue) {
+  const action = state.tableRange[key];
+  const inRange = action && action !== 'fold';
+  if (!inRange) return;
+  const max = comboCount(key);
+  const val = Math.min(sourceValue, max);
+  state.rangeOverrides = state.rangeOverrides || {};
+  if (val === max) delete state.rangeOverrides[key];
+  else state.rangeOverrides[key] = val;
+  // Update only the target cell DOM to keep drag smooth (no full re-render)
+  const td = document.querySelector(`#breakdownBody td.count-cell[data-hand="${key}"]`);
+  if (td) {
+    td.innerHTML = '';
+    td.textContent = String(val);
+    td.style.color = '';
+    td.style.fontWeight = '';
+    td.classList.add('count-dragover');
+    setTimeout(() => td.classList.remove('count-dragover'), 250);
+  }
+  updateUseStats();
 }
 
 function toggleHand(key) {
@@ -3619,16 +3851,26 @@ function updateSyncInfo() {
 }
 
 function syncFromGrid() {
-  // Copy grid state → table state (left → middle)
+  // Copy grid state → table state (left → middle).
+  // Exit compact mode: the new range is unrelated to any previously filtered
+  // subset, and staying in compact mode would make fold cells disappear when
+  // the user later toggles hands (clicking would hide the cell).
   state.tableRange = {};
   for (const k in state.range) {
     if (state.range[k] && state.range[k] !== 'fold') {
       state.tableRange[k] = state.range[k];
     }
   }
+  setCompactMode(false);
   renderBreakdown();
   updateSyncInfo();
   flashButton('syncFromGridBtn');
+}
+
+function setCompactMode(on) {
+  state.tableCompact = !!on;
+  const toggle = document.getElementById('compactViewToggle');
+  if (toggle) toggle.checked = !!on;
 }
 
 /* Auto-sync: when left grid has data but middle table is empty,
@@ -3646,6 +3888,7 @@ function maybeAutoSync() {
         state.tableRange[k] = state.range[k];
       }
     }
+    setCompactMode(false);
     renderBreakdown();
     updateSyncInfo();
     // Brief subtle visual hint
@@ -3658,11 +3901,13 @@ function maybeAutoSync() {
 }
 
 function syncToGrid() {
-  // Copy table state → grid state (middle → left)
+  // Copy table state → grid state (middle → left). Skip 'none' (neutral reset
+  // state) so hands in that state don't pollute the left grid.
   state.range = {};
   for (const k in state.tableRange) {
-    if (state.tableRange[k] && state.tableRange[k] !== 'fold') {
-      state.range[k] = state.tableRange[k];
+    const a = state.tableRange[k];
+    if (a && a !== 'fold' && a !== 'none') {
+      state.range[k] = a;
     }
   }
   refresh();
@@ -3672,10 +3917,27 @@ function syncToGrid() {
 }
 
 function clearTable() {
+  // reset: restore all 169 hands to the range with a neutral 'none' action
+  // (renders white in the breakdown) and clear all "use" checkboxes.
+  // Compact mode is exited so the user sees the full table again.
   state.tableRange = {};
+  state.tableUsed = {};
+  state.rangeOverrides = {};
+  for (let r = 0; r < 13; r++) {
+    for (let c = 0; c < 13; c++) {
+      state.tableRange[handKey(r, c)] = 'none';
+    }
+  }
+  setCompactMode(false);
   renderBreakdown();
+  updateUseStats();
   updateSyncInfo();
   flashButton('clearTableBtn');
+  const hint = document.getElementById('autoSyncHint');
+  if (hint) {
+    hint.style.color = '#636e72';
+    hint.textContent = '✓ 已恢复全部 169 种手牌到范围内（均未勾选，白底中性状态）';
+  }
 }
 
 function flashButton(id) {
@@ -3711,7 +3973,7 @@ function useNoneInTable() {
 }
 
 function filterByUseInTable() {
-  // 取消未勾选"使用"的组合的选中状态：从本表范围移除未勾选的组合
+  // 取消未勾选"使用"的组合的选中状态：从本表范围移除未勾选的组合，并自动进入紧凑模式
   const bd = buildBreakdown();
   const all = [...bd.pairs, ...bd.suiteds, ...bd.offs];
   let removed = 0;
@@ -3721,6 +3983,8 @@ function filterByUseInTable() {
       removed++;
     }
   }
+  // Auto-enter compact mode so removed hands physically disappear from the table
+  setCompactMode(true);
   renderBreakdown();
   updateUseStats();
   updateSyncInfo();
@@ -3729,14 +3993,185 @@ function filterByUseInTable() {
   if (hint) {
     hint.style.color = removed ? '#e17055' : '#636e72';
     hint.textContent = removed
-      ? `已从范围中移除 ${removed} 个未勾选"使用"的组合`
+      ? `已从范围中移除 ${removed} 个未勾选"使用"的组合（已开启紧凑视图）`
       : '本表范围内没有未勾选"使用"的组合';
   }
 }
 
+/* Compact view toggle: when on, breakdown rows whose all 3 hand cells are
+   fold are hidden. Lets the user see only hands still in the range. */
+document.getElementById('compactViewToggle').addEventListener('change', (e) => {
+  state.tableCompact = e.target.checked;
+  renderBreakdown();
+});
+
 document.getElementById('useAllTableBtn').addEventListener('click', useAllInTable);
 document.getElementById('useNoneTableBtn').addEventListener('click', useNoneInTable);
 document.getElementById('filterByUseTableBtn').addEventListener('click', filterByUseInTable);
+
+/* ----- AI recommends top-N% hand strength within current range -----
+   Calls LLM with the current public board + in-range hands, asks AI to rank
+   hands by post-flop strength (made hands / draws) and return the top pct%.
+   Result is intersected with the current range so out-of-range hands are dropped,
+   then state.tableUsed is replaced with the AI-picked subset.
+*/
+async function aiRecommendTopStrength(pct) {
+  if (!ensureApiKey()) return;
+  const { apiKey, model, baseUrl } = getApiCreds();
+
+  const inRangeHands = Object.keys(state.tableRange).filter(k => state.tableRange[k] && state.tableRange[k] !== 'fold');
+  const hint = document.getElementById('autoSyncHint');
+  const btn = document.getElementById('aiRecommendTopBtn');
+  if (inRangeHands.length === 0) {
+    if (hint) {
+      hint.style.color = '#e17055';
+      hint.textContent = '⚠ 当前表格中没有手牌，请先同步左侧或添加手牌';
+    }
+    return;
+  }
+
+  const totalHands = inRangeHands.length;
+  const handMax = {};
+  inRangeHands.forEach(h => {
+    const action = state.tableRange[h];
+    const theoretical = comboCount(h);
+    handMax[h] = effectiveCount({ key: h, count: theoretical, action });
+  });
+  const totalEff = Object.values(handMax).reduce((s, n) => s + n, 0);
+  const pickEffCombos = Math.max(0.5, totalEff * pct / 100);
+  const boardStr = state.board.filter(c => c).map(c => c.rank + c.suit).join(' ') || '（无公共牌）';
+
+  if (hint) {
+    hint.style.color = '#74b9ff';
+    hint.textContent = `🤖 AI 正在分析 ${totalHands} 种手牌（共 ${parseFloat(totalEff.toFixed(2))} 有效组合），目标保留 ${pct}% ≈ ${parseFloat(pickEffCombos.toFixed(2))} 组合...`;
+  }
+  if (btn) btn.disabled = true;
+
+  const userPrompt = `你是德州扑克（Texas Hold'em）GTO 顾问，熟悉 GTO Wizard / PioSOLVER / GTO+ 等求解器输出。
+
+【当前公共牌】 ${boardStr}
+【起手牌池】共 ${totalHands} 种。格式: 手牌 最大组合数（已考虑当前牌面）
+
+${inRangeHands.map(h => `${h} ${Number.isInteger(handMax[h]) ? handMax[h] : parseFloat(handMax[h].toFixed(2))}`).join('\n')}
+
+【任务】基于当前公共牌结构，对每种手牌逐一判断"值得下注的组合数"。
+
+⚠️ 关键原则:
+- 同花（s）和非同花（o）必须分开独立判断，不能混为一谈
+- 听牌价值要保留：同花听牌（flush draw）、顺子听牌（straight draw）值得保留部分组合
+- 不要把一个手牌当作整体考虑（全要或全不要）
+- 必须精确返回每个手牌应保留的组合数（0 到 最大组合数 之间）
+
+目标: 总保留组合数 ≈ ${parseFloat(totalEff.toFixed(2))} × ${pct}% ≈ ${parseFloat(pickEffCombos.toFixed(2))}（允许 ±10% 浮动）
+
+牌力参考:
+1. 已成牌（顶对 / 两对 / 三条 / 顺 / 同花 / 葫芦 / 金刚）最强
+2. 强听牌组合（双头顺听 + 同花听）次之
+3. 中对 / 底对 / 单一听牌
+4. 弱听牌（卡顺听）
+5. 纯高牌（无成牌无听牌）—— 几乎没有价值
+
+按 GTO 思路判断：稀有强牌优先；纯高牌在强公共牌面（高张成片）上没价值，应当返回 0；同花听牌通常保留部分组合。
+
+【输出要求】只输出 JSON，格式: {"AA": 6, "AKs": 3, "AKo": 0, ...}
+- 必须包含所有 ${totalHands} 种手牌（即使是 0 也要写出）
+- 每个值是整数（0 到 该手牌最大组合数 之间）
+- 不要任何解释、Markdown、代码块或前后缀文字`;
+
+  const systemPrompt = getEffectiveSystemPrompt();
+  try {
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 500000,
+        thinking: { type: 'adaptive' },
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }]
+      })
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errText.substring(0, 200)}`);
+    }
+    const data = await response.json();
+    const textBlocks = (data.content || []).filter(c => c.type === 'text');
+    const text = textBlocks.map(c => c.text || '').join('');
+    // Try to extract JSON object from the response (in case it's wrapped in markdown)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('AI 返回内容未包含 JSON 对象');
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      throw new Error('AI 返回 JSON 解析失败：' + e.message);
+    }
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new Error('AI 返回 JSON 不是对象');
+    }
+
+    // Update rangeOverrides based on AI's per-hand counts.
+    // - count === 0: remove from range (treat as fold)
+    // - count === max: remove override (use theoretical)
+    // - 0 < count < max: set override
+    state.rangeOverrides = {};
+    let updated = 0;
+    let removed = 0;
+    let kept = 0;
+    for (const h of inRangeHands) {
+      const max = handMax[h];
+      if (!(h in parsed)) continue;
+      let n = parseInt(parsed[h], 10);
+      if (isNaN(n)) n = 0;
+      n = Math.max(0, Math.min(n, max));
+      if (n === 0) {
+        delete state.tableRange[h];
+        removed++;
+      } else if (Math.abs(n - comboCount(h)) < 1e-9) {
+        // AI returned the full theoretical count — clear any override
+        kept++;
+      } else {
+        state.rangeOverrides[h] = n;
+        kept++;
+      }
+      updated++;
+    }
+    renderBreakdown();
+    updateUseStats();
+    flashButton('aiRecommendTopBtn');
+    if (hint) {
+      if (updated > 0) {
+        hint.style.color = '#00b894';
+        const totalAfter = inRangeHands.reduce((s, h) => {
+          if (!(h in state.tableRange)) return s;
+          const action = state.tableRange[h];
+          return s + effectiveCount({ key: h, count: comboCount(h), action });
+        }, 0);
+        hint.textContent = `🤖 AI 推荐完成：${kept} 种保留 / ${removed} 种移除；保留组合数 ${parseFloat(totalAfter.toFixed(2))} / 总 ${parseFloat(totalEff.toFixed(2))}`;
+      } else {
+        hint.style.color = '#e17055';
+        hint.textContent = '⚠ AI 返回结果无有效内容，请重试';
+      }
+    }
+  } catch (err) {
+    if (hint) {
+      hint.style.color = '#e17055';
+      hint.textContent = '⚠ AI 推荐失败：' + err.message;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+document.getElementById('aiRecommendTopBtn').addEventListener('click', () => aiRecommendTopStrength(70));
 
 /* ----- Blocker logic: subtract combos blocked by board cards ----- */
 const SUIT_NAMES = ['s', 'h', 'd', 'c'];
@@ -3838,26 +4273,39 @@ document.getElementById('applyBlockersBtn').addEventListener('click', applyBlock
 document.getElementById('resetBlockersBtn').addEventListener('click', resetBlockers);
 
 /* ----- Random board generator -----
-   3 separate buttons (flop / turn / river). Each button is single-use: after
-   clicking once, it locks itself out until the board is cleared. Clicking the
-   same button twice has no effect — user must clear and click again to re-roll.
+   3 separate buttons (flop / turn / river). Each button is re-rollable: clicking
+   again re-generates the corresponding stage's slots.
+   - If the stage has empty slots: fill only the empty ones (preserve manually placed cards).
+   - If the stage is fully filled: re-roll every slot in that stage.
+   Other-stage cards (e.g. turn/river) are always preserved.
 */
 function randomStage(stage, btnId) {
   const slotsForStage = stage === 'flop' ? [0,1,2] : stage === 'turn' ? [3] : [4];
 
-  // If all relevant slots are already filled, do nothing
+  // Decide which slots to (re-)fill
+  // - When any slot in the stage is empty: only fill the empties (preserve manual)
+  // - When all slots are filled: re-roll every slot in this stage
   const allFilled = slotsForStage.every(i => state.board[i]);
-  if (allFilled) return;
+  const targetSlots = allFilled ? slotsForStage : slotsForStage.filter(i => !state.board[i]);
+  if (targetSlots.length === 0) return;
 
-  // Build deck excluding cards already placed anywhere on the board
-  const used = new Set();
-  for (const c of state.board) {
-    if (c) used.add(c.rank + c.suit);
+  // Build "do-not-pick" set:
+  //  - Always preserve other-stage cards.
+  //  - When partially filling (not allFilled), also preserve existing in-stage cards.
+  const excluded = new Set();
+  for (let i = 0; i < 5; i++) {
+    const c = state.board[i];
+    if (!c) continue;
+    if (slotsForStage.includes(i) && !allFilled) {
+      excluded.add(c.rank + c.suit);
+    } else if (!slotsForStage.includes(i)) {
+      excluded.add(c.rank + c.suit);
+    }
   }
   const pool = [];
   for (const r of RANKS) {
     for (const s of ['s','h','d','c']) {
-      if (!used.has(r + s)) pool.push({ rank: r, suit: s });
+      if (!excluded.has(r + s)) pool.push({ rank: r, suit: s });
     }
   }
   // Fisher-Yates shuffle
@@ -3865,24 +4313,14 @@ function randomStage(stage, btnId) {
     const j = Math.floor(Math.random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  // Fill empty slots only (preserve user-locked cards)
   let pickIdx = 0;
-  for (const slot of slotsForStage) {
-    if (state.board[slot]) continue;
+  for (const slot of targetSlots) {
     if (pickIdx >= pool.length) break;
     state.board[slot] = pool[pickIdx++];
   }
   renderBoard();
   updateStats();
   flashButton(btnId);
-  // Lock this button until board is cleared
-  const btn = document.getElementById(btnId);
-  if (btn) {
-    btn.disabled = true;
-    btn.style.opacity = '0.4';
-    btn.style.cursor = 'not-allowed';
-    btn.title = '已使用。点击下方"清空所有牌面"后可重新生成。';
-  }
 }
 
 function clearBoard() {
@@ -3890,19 +4328,6 @@ function clearBoard() {
   renderBoard();
   updateStats();
   flashButton('clearBoardBtn');
-  // Unlock all 3 random buttons
-  ['randomFlopBtn', 'randomTurnBtn', 'randomRiverBtn'].forEach(id => {
-    const b = document.getElementById(id);
-    if (!b) return;
-    b.disabled = false;
-    b.style.opacity = '';
-    b.style.cursor = '';
-    b.title = id === 'randomFlopBtn'
-      ? '为 flop (前三张) 各随机补一张牌。点击后此按钮锁定，需先清空才能再点。'
-      : id === 'randomTurnBtn'
-        ? '为 turn (第四张) 随机补一张牌。点击后此按钮锁定。'
-        : '为 river (第五张) 随机补一张牌。点击后此按钮锁定。';
-  });
 }
 
 document.getElementById('randomFlopBtn').addEventListener('click', () => randomStage('flop', 'randomFlopBtn'));
