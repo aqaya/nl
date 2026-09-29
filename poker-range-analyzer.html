@@ -3502,11 +3502,13 @@ function sumTheoreticalChecked(arr) {
 
 /**
  * 把一组手牌数组里"已勾选使用"的 effectiveCount 之和（考虑百分比/覆盖）。
+ * 防御性过滤：effectiveCount = 0 的手牌不计入（即便 state.tableUsed 残留旧标记）
  * @param {Array<{key:string, action:string, count:number}>} arr
  * @returns {number}
  */
 function sumEffectiveChecked(arr) {
-  return arr.filter(x => isUsed(x.key)).reduce((s, x) => s + effectiveCount(x), 0);
+  return arr.filter(x => isUsed(x.key) && effectiveCount(x) > 0)
+            .reduce((s, x) => s + effectiveCount(x), 0);
 }
 
 /**
@@ -3617,6 +3619,17 @@ function makeUseTd(item) {
   td.dataset.hand = item.key;
   const inRange = item.action && item.action !== 'fold';
   if (!inRange) {
+    td.style.color = '#ccc';
+    td.textContent = '-';
+    td.classList.add('fold');
+    return td;
+  }
+  // 使用组合数 = 0（如百分比=0、或重阻塞把可用池扣空）：不可"使用中"，渲染为占位"-"，
+  // 同时清理陈旧的 state.tableUsed 标记（避免污染聚合统计）
+  if (effectiveCount(item) === 0) {
+    if (state.tableUsed && state.tableUsed[item.key]) {
+      delete state.tableUsed[item.key];
+    }
     td.style.color = '#ccc';
     td.textContent = '-';
     td.classList.add('fold');
