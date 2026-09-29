@@ -1990,13 +1990,12 @@
     <div class="stats-section">
       <div class="section-header">使用中组合统计</div>
       <table class="stats-table">
-        <tr><th title="在中间表格里勾选了『使用』列的所有组合数（按百分比折算后）。混合策略（如 raise:50）按比例计入。">使用中组合数!</th><td><strong id="usedCount" style="color:#00b894; font-size:14px;">0</strong></td></tr>
-        <tr><th title="范围内所有手牌的有效组合数（按百分比折算后 + 阻塞扣除）。= 使用中 + 未使用。">总组合数!</th><td id="totalCount">0</td></tr>
-        <tr><th title="使用中组合数 / 总组合数。反映你当前激活范围占整体的比例。">使用占比!</th><td><strong id="usedPct" style="color:#74b9ff; font-size:14px;">-</strong></td></tr>
-        <tr><th title="已使用的对子组合数 / 范围内全部对子有效组合数（百分比折算后）。口袋对子理论 = 6 组合。">对子使用 / 总!</th><td id="usedPairs">-</td></tr>
-        <tr><th title="已使用的同花组合数 / 范围内全部同花有效组合数（百分比折算后）。同花理论 = 4 组合。">同花使用 / 总!</th><td id="usedSuiteds">-</td></tr>
-        <tr><th title="已使用的异花组合数 / 范围内全部异花有效组合数（百分比折算后）。异花理论 = 12 组合。">异花使用 / 总!</th><td id="usedOffs">-</td></tr>
-        <tr><th title="范围内已勾选但未标为『使用』的有效组合数。= 总组合数 - 使用中组合数。">未使用组合数!</th><td id="exclCount" style="color:#d63031;">0</td></tr>
+        <tr><th title="勾选手牌的有效组合数之和（考虑百分比 / 覆盖后的实际计数）。混合策略（如 raise:50）按比例计入。">我修改选中的组合数!</th><td><strong id="usedCount" style="color:#00b894; font-size:14px;">0</strong></td></tr>
+        <tr><th title="勾选手牌的理论最大组合数之和（对子 = 6、同花 = 4、异花 = 12，**不考虑**百分比 / 覆盖）。">可能组合数!</th><td id="totalCount">0</td></tr>
+        <tr><th title="使用占比 = 我修改选中的组合数 / 可能组合数。反映勾选手牌中理论最大 vs 实际计入的比例。">使用占比!</th><td><strong id="usedPct" style="color:#74b9ff; font-size:14px;">-</strong></td></tr>
+        <tr><th title="已使用的对子 = 我修改 / 可能 = 勾选对子的 effectiveCount 之和 / 理论 6×对子数 之和。">对子使用 / 可能!</th><td id="usedPairs">-</td></tr>
+        <tr><th title="已使用的同花 = 我修改 / 可能 = 勾选同花的 effectiveCount 之和 / 理论 4×同花数 之和。">同花使用 / 可能!</th><td id="usedSuiteds">-</td></tr>
+        <tr><th title="已使用的异花 = 我修改 / 可能 = 勾选异花的 effectiveCount 之和 / 理论 12×异花数 之和。">异花使用 / 可能!</th><td id="usedOffs">-</td></tr>
       </table>
       <div style="font-size:10px; color:#888; margin-top:6px;">
         勾选中间表格的"使用"列标记正在使用中的手牌。每个对子 = 6 组合，同花 = 4，异花 = 12。
@@ -3421,6 +3420,25 @@ function sumCombos(arr) {
 }
 
 /**
+ * 把一组手牌数组里"已勾选使用"的**理论最大组合数**累加（item.count，不考虑百分比/覆盖）。
+ * 与 sumCombos 的区别在于不考虑 effectiveCount 的折算，仅用作使用占比的分母。
+ * @param {Array<{key:string, action:string, count:number}>} arr
+ * @returns {number}
+ */
+function sumTheoreticalChecked(arr) {
+  return arr.filter(x => isUsed(x.key)).reduce((s, x) => s + x.count, 0);
+}
+
+/**
+ * 把一组手牌数组里"已勾选使用"的 effectiveCount 之和（考虑百分比/覆盖）。
+ * @param {Array<{key:string, action:string, count:number}>} arr
+ * @returns {number}
+ */
+function sumEffectiveChecked(arr) {
+  return arr.filter(x => isUsed(x.key)).reduce((s, x) => s + effectiveCount(x), 0);
+}
+
+/**
  * 判断某手牌是否被用户勾选为"使用中"
  * 默认未勾选 = 未使用（用户必须主动勾选才会计入使用占比）
  * @param {string} key 手牌 key
@@ -3555,41 +3573,45 @@ function fmtCount(n) {
 
 /**
  * 重算并写入 breakdown 表上方的"使用统计"区域：
- * 总使用组合 / 总范围组合 / 使用占比 / 对子/同花/异花 各自的 已用 vs 总数 / 排除数
+ * - 我修改选中的组合数 = 勾选手牌的 effectiveCount 之和（考虑百分比/覆盖）
+ * - 可能组合数        = 勾选手牌的理论最大 item.count 之和（不考虑百分比/覆盖）
+ * - 使用占比          = 我修改选中的总和 / 可能组合数总和
+ * - 对子/同花/异花 各自的 已用 vs 可能（均仅看勾选手牌）
  */
 function updateUseStats() {
   const bd = buildBreakdown();
-  const all = [...bd.pairs, ...bd.suiteds, ...bd.offs];
-  const inRange = all.filter(x => x.action && x.action !== 'fold');
-  const total = inRange.reduce((s, x) => s + effectiveCount(x), 0);
-  const used = inRange.filter(x => isUsed(x.key)).reduce((s, x) => s + effectiveCount(x), 0);
-  const pct = total ? Math.round(100 * used / total) : 0;
 
-  // Per-type breakdown (each pair=6, suited=4, off=12)
-  const sumUsed   = arr => arr.filter(x => isUsed(x.key)).reduce((s, x) => s + effectiveCount(x), 0);
-  const sumTotal  = arr => arr.filter(x => x.action && x.action !== 'fold').reduce((s, x) => s + effectiveCount(x), 0);
-  const usedPairs = sumUsed(bd.pairs);
-  const totPairs  = sumTotal(bd.pairs);
-  const usedSu    = sumUsed(bd.suiteds);
-  const totSu     = sumTotal(bd.suiteds);
-  const usedOff   = sumUsed(bd.offs);
-  const totOff    = sumTotal(bd.offs);
+  // "我修改选中的" = effectiveCount 之和（仅勾选手牌）
+  // "可能组合数"   = item.count 之和（仅勾选手牌，未折算）
+  const myModified = sumEffectiveChecked(bd.pairs)
+                   + sumEffectiveChecked(bd.suiteds)
+                   + sumEffectiveChecked(bd.offs);
+  const possible   = sumTheoreticalChecked(bd.pairs)
+                   + sumTheoreticalChecked(bd.suiteds)
+                   + sumTheoreticalChecked(bd.offs);
+  const pct = possible ? Math.round(100 * myModified / possible) : 0;
 
-  const usedEl  = document.getElementById('usedCount');
-  const totalEl = document.getElementById('totalCount');
-  const pctEl   = document.getElementById('usedPct');
-  const pEl     = document.getElementById('usedPairs');
-  const sEl     = document.getElementById('usedSuiteds');
-  const oEl     = document.getElementById('usedOffs');
-  const exclEl  = document.getElementById('exclCount');
-  if (!usedEl) return;
-  usedEl.textContent = fmtCount(used);
-  totalEl.textContent = fmtCount(total);
-  pctEl.textContent = total ? (pct + '%') : '-';
-  pEl.textContent = `${fmtCount(usedPairs)} / ${fmtCount(totPairs)}`;
-  sEl.textContent = `${fmtCount(usedSu)} / ${fmtCount(totSu)}`;
-  oEl.textContent = `${fmtCount(usedOff)} / ${fmtCount(totOff)}`;
-  exclEl.textContent = fmtCount(total - used);
+  // Per-type breakdown（均仅看勾选手牌）
+  const usedPairs = sumEffectiveChecked(bd.pairs);
+  const posPairs  = sumTheoreticalChecked(bd.pairs);
+  const usedSu    = sumEffectiveChecked(bd.suiteds);
+  const posSu     = sumTheoreticalChecked(bd.suiteds);
+  const usedOff   = sumEffectiveChecked(bd.offs);
+  const posOff    = sumTheoreticalChecked(bd.offs);
+
+  const myEl     = document.getElementById('usedCount');
+  const posEl    = document.getElementById('totalCount');
+  const pctEl    = document.getElementById('usedPct');
+  const pEl      = document.getElementById('usedPairs');
+  const sEl      = document.getElementById('usedSuiteds');
+  const oEl      = document.getElementById('usedOffs');
+  if (!myEl) return;
+  myEl.textContent  = fmtCount(myModified);
+  posEl.textContent = fmtCount(possible);
+  pctEl.textContent = possible ? (pct + '%') : '-';
+  pEl.textContent = `${fmtCount(usedPairs)} / ${fmtCount(posPairs)}`;
+  sEl.textContent = `${fmtCount(usedSu)} / ${fmtCount(posSu)}`;
+  oEl.textContent = `${fmtCount(usedOff)} / ${fmtCount(posOff)}`;
 }
 
 /**
