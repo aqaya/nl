@@ -2195,6 +2195,9 @@
     <button data-tool="board">🌊 牌面分析</button>
     <button data-tool="rangeviz">📊 范围对比</button>
     <button data-tool="eqdist">📈 胜率分布</button>
+    <button data-tool="spr">📏 SPR 策略</button>
+    <button data-tool="mev">🌲 多街 EV</button>
+    <button data-tool="replayer">🎬 手牌回放器</button>
   </div>
 
   <!-- Tool: Hand Rankings -->
@@ -2813,6 +2816,146 @@
     <div class="calc-card" style="margin-top:10px;">
       <h4>🃏 顶部 10 手牌（按胜率排序）</h4>
       <div id="edTopHands" style="max-height:300px; overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <!-- Tool: SPR Strategy Assistant -->
+  <div class="tool-panel" id="tool-spr">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      Stack-to-Pot Ratio 是后段决策的关键参数。输入有效筹码和底池，得到 SPR + 推荐策略（commit 模式 vs small ball）。
+    </div>
+    <div class="calc-grid">
+      <div class="calc-card">
+        <h4>📏 输入</h4>
+        <div class="calc-input-row">
+          <label>有效筹码 (BB):</label>
+          <input type="number" id="sprStack" value="80" min="0.1" step="0.5" />
+        </div>
+        <div class="calc-input-row">
+          <label>当前底池 (BB):</label>
+          <input type="number" id="sprPot" value="12" min="0.1" step="0.1" />
+        </div>
+        <div class="calc-input-row">
+          <label>街:</label>
+          <select id="sprStreet">
+            <option value="flop">翻牌</option>
+            <option value="turn">转牌</option>
+            <option value="river">河牌</option>
+          </select>
+        </div>
+        <button class="calc-btn" id="sprRun" style="width:100%; margin-top:8px; padding:10px; background:#74b9ff; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">📐 计算 SPR</button>
+      </div>
+      <div class="calc-card">
+        <h4>📊 策略建议</h4>
+        <div id="sprResult">
+          <div style="text-align:center; margin:8px 0;">
+            <span class="texture-badge" id="sprBadge">—</span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div class="calc-result"><div class="result-label">SPR 值</div><div class="result-value" id="sprValue" style="font-size:18px;">—</div></div>
+            <div class="calc-result"><div class="result-label">剩余可下注</div><div class="result-value" id="sprRemaining" style="font-size:18px;">—</div></div>
+          </div>
+          <div class="calc-result" style="margin-top:10px;">
+            <div class="result-label">推荐打法</div>
+            <div class="result-value" id="sprStrategy" style="font-size:13px; text-align:left; line-height:1.6;">—</div>
+          </div>
+          <div class="calc-result" style="margin-top:8px;">
+            <div class="result-label">推荐 c-bet 尺寸</div>
+            <div class="result-value" id="sprSizing" style="font-size:14px;">—</div>
+          </div>
+          <div class="calc-formula" id="sprFormula">SPR = 有效筹码 ÷ 底池</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tool: Multi-street EV Tree -->
+  <div class="tool-panel" id="tool-mev">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      多街决策 EV：输入每一街的尺寸和胜率估计，得到累计 EV 和每街贡献。
+      <br>胜率随街动态变化（每多一张牌会变），手动估计即可。
+    </div>
+    <div class="calc-card">
+      <h4>📥 多街动作序列</h4>
+      <div id="mevStreets"></div>
+      <button id="mevAddStreet" style="margin-top:8px; padding:6px 12px; background:#74b9ff; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:12px;">+ 添加下一街</button>
+      <button class="calc-btn" id="mevRun" style="width:100%; margin-top:12px; padding:10px; background:#00b894; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">🌲 计算累计 EV</button>
+    </div>
+    <div class="calc-card" style="margin-top:10px;">
+      <h4>📊 结果</h4>
+      <div id="mevResult">
+        <div class="calc-result good">
+          <div class="result-label">累计 EV</div>
+          <div class="result-value" id="mevCumulative">—</div>
+        </div>
+        <div class="calc-formula" id="mevBreakdown">添加街并运行分析</div>
+        <table id="mevTable" style="width:100%; font-size:11px; margin-top:10px; border-collapse:collapse; display:none;">
+          <thead><tr style="background:#f8f9fa;"><th style="padding:4px;">街</th><th style="padding:4px;">动作</th><th style="padding:4px;">尺寸</th><th style="padding:4px;">胜率</th><th style="padding:4px;">EV 贡献</th><th style="padding:4px;">累计</th></tr></thead>
+          <tbody id="mevTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tool: Hand History Replayer -->
+  <div class="tool-panel" id="tool-replayer">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      实战场景分析器：输入当前牌局状态（底池、筹码、公共牌），选择你的底牌和对手范围，自动计算每个候选动作的 EV 并推荐最佳。
+      <br>相比单街 EV 决策，这里直接集成胜率 + 多动作对比。
+    </div>
+    <div class="calc-grid">
+      <div class="calc-card">
+        <h4>🎬 当前场景</h4>
+        <div class="calc-input-row">
+          <label>底池 (BB):</label>
+          <input type="number" id="rpPot" value="20" min="0" step="0.5" />
+        </div>
+        <div class="calc-input-row">
+          <label>我已投入 (BB):</label>
+          <input type="number" id="rpMyInvest" value="0" min="0" step="0.1" />
+        </div>
+        <div class="calc-input-row">
+          <label>对手已投入 (BB):</label>
+          <input type="number" id="rpVillInvest" value="20" min="0" step="0.1" />
+        </div>
+        <div class="calc-input-row">
+          <label>有效剩余筹码 (BB):</label>
+          <input type="number" id="rpStack" value="60" min="0" step="0.5" />
+        </div>
+        <div class="calc-input-row">
+          <label>我的底牌:</label>
+          <input type="text" id="rpHand" value="As Kd" placeholder="如 As Kd 或 AhKh" />
+        </div>
+        <div class="calc-input-row">
+          <label>公共牌:</label>
+          <input type="text" id="rpBoard" placeholder="0-5 张，如 Qh Jd 7c 2s" />
+        </div>
+        <div class="calc-input-row">
+          <label>对手范围:</label>
+          <input type="text" id="rpVillRange" value="AA, KK, QQ, JJ, AKs, AKo, AQs, AQo" />
+        </div>
+        <div class="calc-input-row">
+          <label>采样数:</label>
+          <input type="number" id="rpSamples" value="300" min="100" max="2000" />
+        </div>
+        <button class="calc-btn" id="rpRun" style="width:100%; margin-top:8px; padding:10px; background:#d63031; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">🎲 分析场景</button>
+      </div>
+      <div class="calc-card">
+        <h4>🎯 决策建议</h4>
+        <div id="rpResult">
+          <div class="calc-result" style="margin-bottom:8px;">
+            <div class="result-label">我手牌 vs 范围胜率</div>
+            <div class="result-value" id="rpEquity">—</div>
+          </div>
+          <div style="font-size:11px; color:#636e72; margin:8px 0 4px;">每个候选动作的 EV：</div>
+          <div id="rpActions"></div>
+          <div class="calc-result good" style="margin-top:10px; display:none;" id="rpRecommendWrap">
+            <div class="result-label">⭐ 推荐</div>
+            <div class="result-value" id="rpRecommend" style="font-size:14px;">—</div>
+          </div>
+          <div class="calc-formula" id="rpFormula">点击"分析场景"开始</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -6499,6 +6642,9 @@ document.querySelectorAll('.tools-tabs button').forEach(btn => {
     if (target === 'board') runBoardAnalyze();
     if (target === 'rangeviz') runRangeViz();
     if (target === 'eqdist') runEqDist();
+    if (target === 'spr') runSPR();
+    if (target === 'mev') { _mevMaybeInit(); }
+    if (target === 'replayer') runReplayer();
   });
 });
 
@@ -9951,6 +10097,345 @@ function runEqDist() {
 document.getElementById('edRun').addEventListener('click', runEqDist);
 document.getElementById('edHero').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEqDist(); });
 document.getElementById('edVillain').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEqDist(); });
+
+/* ============================================================
+   Tool: SPR Strategy Assistant
+   ============================================================ */
+
+/**
+ * 给定有效筹码和底池，返回 SPR + 推荐策略
+ * @param {number} stack 有效筹码 (BB)
+ * @param {number} pot 底池 (BB)
+ * @param {string} street 翻牌/转牌/河牌
+ * @returns {object} { spr, level, label, strategy, sizing }
+ */
+function _calcSPRStrategy(stack, pot, street) {
+  const spr = stack / pot;
+  let level, label, strategy, sizing;
+  if (spr < 2) {
+    level = '极低';
+    label = 'commit';
+    strategy = `SPR < 2：极低 SPR，**顶对就可以打光**。任何合理顶对 / 超对都应该直接 all-in 或下注到 commit。`;
+    sizing = '75-100% 底池（甚至 all-in）';
+  } else if (spr < 5) {
+    level = '低';
+    label = 'commit';
+    strategy = `SPR 2-5：低 SPR，**强顶对 + 暗三 + 两对**可以打光。中等顶对 c-bet 一次，看对手反应再决定。`;
+    sizing = '60-75% 底池';
+  } else if (spr < 10) {
+    level = '中';
+    label = 'mixed';
+    strategy = `SPR 5-10：中 SPR，需要**真正强的牌**（暗三、两对、顺子）才能打光。顶对通常只能打 1-2 街。`;
+    sizing = '50-66% 底池';
+  } else if (spr < 15) {
+    level = '高';
+    label = 'small-ball';
+    strategy = `SPR 10-15：高 SPR，**实现权益优先**。听牌价值提升，避免在没有强牌时构建大底池。`;
+    sizing = '33-50% 底池';
+  } else {
+    level = '极高';
+    label = 'small-ball';
+    strategy = `SPR > 15：极高 SPR，纯 small ball 模式。**只下小注**避免被套池，依赖隐含赔率。`;
+    sizing = '25-33% 底池';
+  }
+  // 街调整
+  if (street === 'turn') {
+    strategy += `（转牌：再加 1 街可下注空间，注意摊牌价值削弱）`;
+  } else if (street === 'river') {
+    strategy += `（河牌：决策一次性，薄价值下注 vs check-call 更重要）`;
+  }
+  const remaining = stack + pot;  // 当前还能 bet 的总筹码
+  return { spr, level, label, strategy, sizing, remaining };
+}
+
+function runSPR() {
+  const stack = parseFloat(document.getElementById('sprStack').value) || 0;
+  const pot = parseFloat(document.getElementById('sprPot').value) || 0;
+  const street = document.getElementById('sprStreet').value;
+  if (pot <= 0 || stack <= 0) {
+    document.getElementById('sprValue').textContent = '—';
+    document.getElementById('sprRemaining').textContent = '—';
+    document.getElementById('sprBadge').textContent = '—';
+    document.getElementById('sprBadge').className = 'texture-badge';
+    document.getElementById('sprStrategy').textContent = '⚠ 筹码和底池必须 > 0';
+    return;
+  }
+  const r = _calcSPRStrategy(stack, pot, street);
+  document.getElementById('sprValue').textContent = r.spr.toFixed(2);
+  document.getElementById('sprRemaining').textContent = (r.remaining).toFixed(1) + ' BB';
+  const badge = document.getElementById('sprBadge');
+  badge.textContent = r.level + ' SPR';
+  badge.className = 'texture-badge ' + (r.label === 'commit' ? 'texture-wet' : 'texture-dry');
+  document.getElementById('sprStrategy').innerHTML = r.strategy.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  document.getElementById('sprSizing').textContent = r.sizing;
+  document.getElementById('sprFormula').textContent = `SPR = ${stack} ÷ ${pot} = ${r.spr.toFixed(2)} · 模式：${r.label}`;
+}
+
+document.getElementById('sprRun').addEventListener('click', runSPR);
+document.getElementById('sprPot').addEventListener('keydown', (e) => { if (e.key === 'Enter') runSPR(); });
+document.getElementById('sprStack').addEventListener('keydown', (e) => { if (e.key === 'Enter') runSPR(); });
+
+/* ============================================================
+   Tool: Multi-street EV Tree
+   ============================================================ */
+
+/**
+ * 创建一个多街输入行的 HTML
+ * @param {number} idx 序号
+ * @param {string} street 街名
+ * @returns {string} HTML
+ */
+function _mevStreetRowHTML(idx, street) {
+  return `<div class="mev-row" data-idx="${idx}" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap:6px; align-items:center; padding:6px; margin:4px 0; background:#f8f9fa; border-radius:4px;">
+    <div style="font-weight:600; color:#2d3436;">${idx + 1}. ${street}</div>
+    <select class="mev-action" style="padding:4px; font-size:11px;">
+      <option value="check">看牌</option>
+      <option value="call">跟注</option>
+      <option value="bet">下注</option>
+      <option value="raise">加注</option>
+      <option value="fold">弃牌</option>
+    </select>
+    <input type="number" class="mev-size" placeholder="尺寸(BB)" value="${street === 'Preflop' ? '2.5' : '5'}" min="0" step="0.5" style="padding:4px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px;" />
+    <input type="number" class="mev-eq" placeholder="胜率%" value="50" min="0" max="100" step="1" style="padding:4px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px;" />
+    <button class="mev-del" data-idx="${idx}" style="padding:4px 8px; background:#d63031; color:#fff; border:none; border-radius:3px; cursor:pointer; font-size:11px;">删</button>
+  </div>`;
+}
+
+let _mevStreets = [];
+
+/**
+ * 添加新的街（默认 4 行：Preflop, Flop, Turn, River）
+ */
+function _mevInitStreets() {
+  if (_mevStreets.length > 0) return;
+  const defaults = ['Preflop', 'Flop', 'Turn', 'River'];
+  _mevStreets = defaults.map(s => ({ street: s, action: s === 'Preflop' ? 'bet' : 'bet', size: s === 'Preflop' ? 2.5 : 5, eq: 50 }));
+  _mevRenderStreets();
+}
+
+function _mevRenderStreets() {
+  const container = document.getElementById('mevStreets');
+  let html = '<div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap:6px; font-size:11px; color:#636e72; padding:0 6px;"><div>街</div><div>动作</div><div>尺寸(BB)</div><div>胜率%</div><div></div></div>';
+  _mevStreets.forEach((row, idx) => {
+    html += _mevStreetRowHTML(idx, row.street);
+  });
+  container.innerHTML = html;
+  // 绑定删除按钮
+  container.querySelectorAll('.mev-del').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      _mevStreets.splice(idx, 1);
+      _mevRenderStreets();
+    });
+  });
+}
+
+function _mevAddStreet() {
+  const last = _mevStreets.length;
+  const nextStreet = ['Preflop', 'Flop', 'Turn', 'River'][last] || `街${last + 1}`;
+  _mevStreets.push({ street: nextStreet, action: 'bet', size: 5, eq: 50 });
+  _mevRenderStreets();
+}
+
+/**
+ * 给定街序列，计算每街 EV 贡献和累计 EV
+ * @param {Array} streets
+ * @returns {object} { rows: [...], cumulative, breakdown }
+ */
+function _calcMultiStreetEV(streets) {
+  let pot = 0;  // 累计底池（每街累加）
+  let cumulative = 0;
+  const rows = [];
+  for (let i = 0; i < streets.length; i++) {
+    const { action, size, eq } = streets[i];
+    const e = (eq || 0) / 100;
+    let contribution;
+    if (action === 'fold') {
+      // 弃牌 EV = 0（最简化）
+      contribution = -pot * 0.1;  // 简单估算：失去前街投入的部分
+      contribution = 0;
+    } else if (action === 'check') {
+      contribution = 0;  // 看牌 EV = 0（不投入也不获得）
+    } else if (action === 'call' || action === 'bet' || action === 'raise') {
+      // 单街 EV = e × (pot + size) − (1 − e) × size
+      const streetEV = e * (pot + size) - (1 - e) * size;
+      contribution = streetEV;
+      pot += size * 2;  // 双方都投入
+    } else {
+      contribution = 0;
+    }
+    cumulative += contribution;
+    rows.push({ idx: i, action, size, eq, contribution, cumulative, pot });
+  }
+  return { rows, cumulative };
+}
+
+function runMultiStreetEV() {
+  if (_mevStreets.length === 0) {
+    document.getElementById('mevCumulative').textContent = '—';
+    document.getElementById('mevBreakdown').textContent = '⚠ 请添加至少一个街';
+    return;
+  }
+  // 收集当前输入
+  document.querySelectorAll('#mevStreets .mev-row').forEach((row, idx) => {
+    _mevStreets[idx].action = row.querySelector('.mev-action').value;
+    _mevStreets[idx].size = parseFloat(row.querySelector('.mev-size').value) || 0;
+    _mevStreets[idx].eq = parseFloat(row.querySelector('.mev-eq').value) || 0;
+  });
+  const result = _calcMultiStreetEV(_mevStreets);
+  const cumEl = document.getElementById('mevCumulative');
+  cumEl.textContent = (result.cumulative >= 0 ? '+' : '') + result.cumulative.toFixed(2) + ' BB';
+  cumEl.parentElement.className = 'calc-result ' + (result.cumulative > 0 ? 'good' : result.cumulative < 0 ? 'bad' : '');
+  document.getElementById('mevBreakdown').textContent =
+    `${_mevStreets.length} 街累计 · 最终底池 ${result.rows[result.rows.length - 1].pot.toFixed(1)} BB`;
+  const table = document.getElementById('mevTable');
+  const tbody = document.getElementById('mevTableBody');
+  table.style.display = '';
+  tbody.innerHTML = '';
+  result.rows.forEach(r => {
+    const actionLabel = { check: '看牌', call: '跟注', bet: '下注', raise: '加注', fold: '弃牌' }[r.action] || r.action;
+    const contribStr = (r.contribution >= 0 ? '+' : '') + r.contribution.toFixed(2);
+    const cumStr = (r.cumulative >= 0 ? '+' : '') + r.cumulative.toFixed(2);
+    const color = r.contribution >= 0 ? '#00b894' : '#d63031';
+    tbody.innerHTML += `<tr style="border-top:1px solid #e9ecef;">
+      <td style="padding:4px;">${_mevStreets[r.idx].street}</td>
+      <td style="padding:4px;">${actionLabel}</td>
+      <td style="padding:4px;">${r.size.toFixed(1)}</td>
+      <td style="padding:4px;">${r.eq.toFixed(0)}%</td>
+      <td style="padding:4px; color:${color};">${contribStr}</td>
+      <td style="padding:4px; font-weight:bold; color:${r.cumulative >= 0 ? '#00b894' : '#d63031'};">${cumStr}</td>
+    </tr>`;
+  });
+}
+
+document.getElementById('mevAddStreet').addEventListener('click', _mevAddStreet);
+document.getElementById('mevRun').addEventListener('click', runMultiStreetEV);
+
+/* ============================================================
+   Tool: Hand History Replayer (Scenario Analyzer)
+   ============================================================ */
+
+/**
+ * 规范化用户输入的手牌字符串（兼容 "AsKd" / "As Kd" / "AS kd" 等）
+ * @param {string} s
+ * @returns {string|null} 标准化为 "AsKd" 形式
+ */
+function _normalizeHand(s) {
+  if (!s) return null;
+  const norm = s.replace(/[\s,]/g, '').toUpperCase().replace(/10/g, 'T');
+  if (norm.length !== 4) return null;
+  const cards = [];
+  for (let i = 0; i < 4; i += 2) {
+    cards.push(_normalizeCard(norm.slice(i, i + 2)));
+  }
+  if (cards.some(c => !c) || new Set(cards).size !== 2) return null;
+  return cards.join(' ');
+}
+
+function runReplayer() {
+  const pot = parseFloat(document.getElementById('rpPot').value) || 0;
+  const stack = parseFloat(document.getElementById('rpStack').value) || 0;
+  const handStr = (document.getElementById('rpHand').value || '').trim();
+  const boardStr = (document.getElementById('rpBoard').value || '').trim();
+  const villStr = (document.getElementById('rpVillain').value || '').trim();
+  const samples = parseInt(document.getElementById('rpSamples').value, 10) || 300;
+  const formulaEl = document.getElementById('rpFormula');
+  if (!handStr || !villStr) {
+    formulaEl.textContent = '⚠ 请输入底牌和对手范围';
+    return;
+  }
+  const heroHand = _normalizeHand(handStr);
+  if (!heroHand) {
+    formulaEl.textContent = '⚠ 底牌格式错误（需 4 字符，如 "AsKd"）';
+    return;
+  }
+  const heroCards = heroHand.split(' ');
+  const boardCards = boardStr ? boardStr.split(/[\s,]+/).map(_normalizeCard).filter(Boolean) : [];
+  if (boardCards.length > 5) {
+    formulaEl.textContent = '⚠ 公共牌最多 5 张';
+    return;
+  }
+  // 阻塞检查
+  const heroSet = new Set(heroCards);
+  if (boardCards.some(c => heroSet.has(c))) {
+    formulaEl.textContent = '⚠ 公共牌与我的底牌冲突';
+    return;
+  }
+  formulaEl.textContent = '🎲 计算中...';
+  document.getElementById('rpEquity').textContent = '...';
+  document.getElementById('rpActions').innerHTML = '';
+  document.getElementById('rpRecommendWrap').style.display = 'none';
+  setTimeout(() => {
+    // 1) 计算 hero vs villain 胜率
+    const eq = _calcEquityMonteCarlo({ hero: heroCards.join(','), villain: villStr, board: boardCards, samples });
+    if (eq.error) {
+      formulaEl.textContent = '⚠ ' + eq.error;
+      return;
+    }
+    const equityPct = (eq.equity * 100).toFixed(1);
+    document.getElementById('rpEquity').textContent = equityPct + '%';
+
+    // 2) 生成候选动作
+    const candidates = [
+      { name: '看牌（不下注）', size: 0, isAggressive: false },
+      { name: '小注 1/3 底池', size: pot * 0.33, isAggressive: true },
+      { name: '标准 1/2 底池', size: pot * 0.5, isAggressive: true },
+      { name: '大注 2/3 底池', size: pot * 0.67, isAggressive: true },
+      { name: '底池大小', size: pot, isAggressive: true },
+      { name: '1.5x 底池', size: pot * 1.5, isAggressive: true },
+      { name: '全押', size: Math.min(stack, pot * 2), isAggressive: true },
+    ];
+    const foldEV = 0;  // 弃牌 EV 简化为 0
+    const candidatesWithEV = candidates.map(c => {
+      let ev;
+      if (c.size === 0) {
+        ev = 0;  // 看牌 EV 简化为 0
+      } else {
+        // 下注/加注 EV = 假设对手 50% 弃牌 + 50% 跟注
+        const foldProb = 0.5;
+        const callProb = 0.5;
+        const evFold = foldProb * pot;  // 对手弃牌赢得底池
+        const evCall = eq.equity * (pot + 2 * c.size) - (1 - eq.equity) * c.size;
+        ev = evFold + callProb * evCall;
+      }
+      return { ...c, ev };
+    });
+
+    // 3) 渲染
+    let html = '';
+    let best = candidatesWithEV[0];
+    candidatesWithEV.forEach(c => {
+      const evStr = (c.ev >= 0 ? '+' : '') + c.ev.toFixed(2);
+      const color = c.ev >= 0 ? '#00b894' : '#d63031';
+      html += `<div style="display:flex; justify-content:space-between; padding:4px 8px; margin:2px 0; background:#f8f9fa; border-radius:3px; font-size:12px;">
+        <span>${c.name} ${c.size > 0 ? '(' + c.size.toFixed(1) + ' BB)' : ''}</span>
+        <span style="color:${color}; font-weight:bold;">${evStr} BB</span>
+      </div>`;
+      if (c.ev > best.ev) best = c;
+    });
+    // 弃牌 EV 也算上
+    const foldStr = '+0.00';
+    html += `<div style="display:flex; justify-content:space-between; padding:4px 8px; margin:2px 0; background:#f8f9fa; border-radius:3px; font-size:12px;">
+      <span>弃牌</span><span style="color:#636e72;">${foldStr} BB</span>
+    </div>`;
+    document.getElementById('rpActions').innerHTML = html;
+
+    if (best.ev > foldEV) {
+      document.getElementById('rpRecommendWrap').style.display = '';
+      document.getElementById('rpRecommend').textContent = `${best.name} (EV ${best.ev >= 0 ? '+' : ''}${best.ev.toFixed(2)} BB)`;
+    }
+    formulaEl.textContent = `底池 ${pot} BB · 剩余 ${stack} BB · 假设对手 50% 弃牌 · ${samples} 次采样`;
+  }, 50);
+}
+
+document.getElementById('rpRun').addEventListener('click', runReplayer);
+document.getElementById('rpHand').addEventListener('keydown', (e) => { if (e.key === 'Enter') runReplayer(); });
+document.getElementById('rpVillain').addEventListener('keydown', (e) => { if (e.key === 'Enter') runReplayer(); });
+
+/* Init multi-street streets on first tab visit */
+function _mevMaybeInit() {
+  if (_mevStreets.length === 0) _mevInitStreets();
+}
 </script>
 
 </body>
