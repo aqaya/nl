@@ -3306,6 +3306,36 @@ function _effectivePreset(pos) {
   return saved[pos] || PRESETS[pos];
 }
 
+/**
+ * 把一个 range 字符串解析成"加权组合数"（混合百分比已折算），除以 1326 得出占理论池的比例
+ * @param {string} rangeStr
+ * @returns {number} 0-100
+ */
+function _computeRangePercentage(rangeStr) {
+  if (!rangeStr) return 0;
+  const map = parseRangeString(rangeStr);
+  let total = 0;
+  for (const [h, pct] of map) {
+    total += comboCount(h) * pct / 100;
+  }
+  return total / 1326 * 100;
+}
+
+/**
+ * 根据 PRESETS 实际解析结果更新 preset 按钮上的"XX%" 标签（之前是硬编码的过时数字）
+ */
+function _updatePresetLabels() {
+  document.querySelectorAll('.preset-row button[data-preset]').forEach(btn => {
+    const pos = btn.dataset.preset;
+    const rangeStr = _effectivePreset(pos);
+    if (!rangeStr) return;
+    const pct = _computeRangePercentage(rangeStr);
+    const pctLabel = pct >= 10 ? pct.toFixed(0) + '%' : pct.toFixed(1) + '%';
+    // 保留原按钮名前缀（如 "UTG "），只替换末尾的百分比
+    btn.textContent = btn.textContent.replace(/\s*\d+(\.\d+)?%$/, '') + ' ' + pctLabel;
+  });
+}
+
 document.querySelectorAll('.preset-row button[data-preset]').forEach(btn => {
   btn.addEventListener('click', () => {
     state.range = {};
@@ -3334,6 +3364,7 @@ document.querySelectorAll('.preset-row button[data-save-preset]').forEach(btn =>
     const ok = _savePresetToLS(pos, rangeStr);
     btn.textContent = ok ? '✓' : '✕';
     btn.title = ok ? `已保存到 localStorage（${pos}）` : '保存失败（localStorage 不可用）';
+    if (ok) _updatePresetLabels();  // 同步刷新相邻 preset 按钮的百分比标签
     setTimeout(() => { btn.textContent = '💾'; btn.title = '保存当前范围为该位置预设'; }, 1500);
   });
 });
@@ -3342,8 +3373,12 @@ document.querySelectorAll('.preset-row button[data-save-preset]').forEach(btn =>
 document.getElementById('resetAllPresets').addEventListener('click', () => {
   if (!confirm('确认清空所有自定义预设？UTG/HJ/CO/BTN/SB 五个按钮都会恢复成出厂默认。')) return;
   _clearAllSavedPresets();
+  _updatePresetLabels();
   alert('已恢复出厂预设。');
 });
+
+// 初始化：根据当前有效预设（localStorage 覆盖优先）更新按钮百分比标签
+_updatePresetLabels();
 
 /* ----- Breakdown table (now editable) ----- */
 /**
