@@ -570,6 +570,22 @@
     cursor: pointer;
   }
   .preset-row button:hover { background: #f1f3f5; }
+  .preset-row .preset-save {
+    flex: 0 0 28px;
+    min-width: 28px;
+    padding: 5px 2px;
+    font-size: 12px;
+    background: #f1f3f5;
+    border-color: #b2bec3;
+  }
+  .preset-row .preset-reset {
+    flex: 0 0 auto;
+    min-width: 60px;
+    background: #ffeaa7;
+    border-color: #fdcb6e;
+    color: #2d3436;
+  }
+  .preset-row .preset-reset:hover { background: #fdcb6e; }
 
   /* AI Panel */
   .ai-panel {
@@ -1844,10 +1860,16 @@
 
     <div class="preset-row">
       <button data-preset="utg">UTG 21%</button>
+      <button class="preset-save" data-save-preset="utg" title="保存当前范围为 UTG 预设">💾</button>
       <button data-preset="hj">HJ 21%</button>
+      <button class="preset-save" data-save-preset="hj" title="保存当前范围为 HJ 预设">💾</button>
       <button data-preset="co">CO 28%</button>
+      <button class="preset-save" data-save-preset="co" title="保存当前范围为 CO 预设">💾</button>
       <button data-preset="btn">BTN 48%</button>
+      <button class="preset-save" data-save-preset="btn" title="保存当前范围为 BTN 预设">💾</button>
       <button data-preset="sb">SB 40%</button>
+      <button class="preset-save" data-save-preset="sb" title="保存当前范围为 SB 预设">💾</button>
+      <button id="resetAllPresets" class="preset-reset" title="清空所有自定义预设，恢复出厂">↺ 重置</button>
     </div>
 
     <div class="range-grid" id="rangeGrid"></div>
@@ -2488,6 +2510,20 @@ const SUITS = [
 const ACTION_CYCLE = ['raise', 'call', 'allin', 'fold'];
 const ACTION_LABEL = { raise: '加注', call: '跟注', allin: '全下', fold: '弃牌' };
 
+// 正则常量（全局复用，避免散落各处的小正则拼接）
+//   RX_T_10        — 把 "10" 替换成 "T"，统一手牌字符
+//   RX_HAND_2      — 匹配 "AKo"/"AKs"/"AA" 两字母手牌
+//   RX_HAND_4      — 匹配 "AhKh" 四字母手牌（含花色）
+//   RX_CARD        — 匹配 "Ah" 单张牌
+//   RX_BOARD_SPLIT — 公共牌字符串按空白/逗号拆
+//   RX_HTML_ESCAPE — HTML 转义 5 字符集
+const RX_T_10        = /10/g;
+const RX_HAND_2      = /^([2-9TJQKA])([2-9TJQKA])([so])?$/i;
+const RX_HAND_4      = /^([2-9TJQKA])([shdc])([2-9TJQKA])([shdc])$/i;
+const RX_CARD        = /^([2-9TJQKA])([shdc])$/i;
+const RX_BOARD_SPLIT = /[\s,]+/;
+const RX_HTML_ESCAPE = /[&<>"']/g;
+
 // State
 const state = {
   range: {},            // left grid (master) state
@@ -2510,6 +2546,15 @@ const state = {
   useDrag: null,            // breakdown use-checkbox drag: { active, sourceKey, sourceChecked, startX, startY, moved }
 };
 
+/**
+ * 把 13×13 网格的行列索引转成手牌 key
+ * - 对角线（r===c）→ "AA" 这种对子
+ * - 上三角（r<c） → 大牌在前 + "s"（同花）
+ * - 下三角（r>c） → 大牌在前 + "o"（异花）
+ * @param {number} rowIdx 行号 0-12（0=A）
+ * @param {number} colIdx 列号 0-12（0=A）
+ * @returns {string} 例如 "AKs"、"AA"、"T9o"
+ */
 function handKey(rowIdx, colIdx) {
   const r1 = RANKS[rowIdx];
   const r2 = RANKS[colIdx];
@@ -2521,6 +2566,14 @@ function handKey(rowIdx, colIdx) {
   return big + small + 'o';                        // lower triangle = offsuit
 }
 
+/**
+ * 返回某手牌在 52 张牌里能组合出的全部组合数
+ * - 对子（"AA"）→ 6（C(4,2)）
+ * - 同花（"AKs"）→ 4（4 个花色各一种）
+ * - 异花（"AKo"）→ 12（4×3）
+ * @param {string} key 标准手牌记号，如 "AA"、"AKs"、"AKo"
+ * @returns {number} 该手牌可能的组合数
+ */
 function comboCount(key) {
   if (key.length === 2) return 6;
   if (key.endsWith('s')) return 4;
@@ -2538,10 +2591,18 @@ function comboCount(key) {
      "9Ts"  → "T9s"
      "5Ao"  → "A5o"
    Returns null if input is invalid. */
+/**
+ * 把手牌字符串规范成"大牌在前 + 小写 s/o 后缀"的标准记号
+ * - 不区分大小写，支持 "10" → "T"
+ * - 大小牌顺序无关：会自动按牌力重排
+ * - 同花/异花后缀统一小写
+ * @param {string} s 原始手牌字符串，如 "AKs"、"kAo"、"10s"
+ * @returns {string|null} 规范化结果，无效输入返回 null
+ */
 function normalizeHand(s) {
   if (!s) return null;
   const raw = s.trim();
-  s = raw.toUpperCase().replace(/10/g, 'T');
+  s = raw.toUpperCase().replace(RX_T_10, 'T');
   if (!/^[AKQJT2-9]{1,2}[SO]?$/.test(s)) return null;
   if (s.length === 2) {
     if (s[0] !== s[1]) return null;
@@ -2560,11 +2621,20 @@ function normalizeHand(s) {
   return r2 + r1 + sufLower;
 }
 
+/**
+ * 校验手牌字符串是否符合规范记号，是 normalizeHand 的语义化包装
+ * @param {string} s 待校验的手牌字符串
+ * @returns {string|null} 合法返回规范化形式，否则 null
+ */
 function validateHandNotation(s) {
   return normalizeHand(s);
 }
 
 /* ----- Build 13x13 grid ----- */
+/**
+ * 构建左侧 13×13 主范围网格 DOM：169 个 .cell 元素 + combo 角标
+ * 同时绑定每个 cell 的 mousedown/mouseenter/contextmenu 事件
+ */
 function buildGrid() {
   const grid = document.getElementById('rangeGrid');
   grid.innerHTML = '';
@@ -2591,16 +2661,35 @@ function buildGrid() {
 }
 
 /* ----- Drag-paint / drag-rectangle ----- */
+/**
+ * 用 data-row / data-col 取出网格里对应单元格的 DOM 节点
+ * @param {number} r 行号 0-12
+ * @param {number} c 列号 0-12
+ * @returns {HTMLElement|null} 找到则返回 .cell，否则 null
+ */
 function cellAt(r, c) {
   return document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
 }
 
+/**
+ * 把一个动作（raise/call/allin/fold）写入 state.range
+ * 'fold' 会删除键（range 中不存在即视为弃牌）；其他动作保留为 'action' 或 'action:pct'
+ * @param {string} key 手牌 key，如 "AKs"
+ * @param {string} action 动作或带百分比的混合策略，如 'raise' 或 'raise:60'
+ */
 function applyActionToCell(key, action) {
   if (action === 'fold') delete state.range[key];
   else state.range[key] = action;
 }
 
 // Parse a mixed-strategy value: 'raise' → 'raise:100', 'raise:60' stays, 'call:50' stays
+/**
+ * 规范化混合策略的字符串值
+ * - 已是 "action:pct" 形式则原样返回
+ * - 纯动作（"raise"）自动补成 "raise:100"
+ * @param {string|null} val 原始动作值
+ * @returns {string|null} 规范化结果
+ */
 function normalizeAction(val) {
   if (!val) return null;
   if (typeof val === 'string' && /^[a-z]+:[\d.]+$/.test(val)) return val;
@@ -2609,12 +2698,25 @@ function normalizeAction(val) {
 }
 
 // Extract percentage (0-100) from action string like 'raise:60' or 'raise:5.8'. Returns null for plain actions.
+/**
+ * 从 "raise:60" / "call:5.8" 这类动作字符串里解析百分比
+ * @param {string} action 动作字符串
+ * @returns {number|null} 0-100 之间的数字，纯动作返回 null
+ */
 function getActionPercent(action) {
   if (!action || typeof action !== 'string') return null;
   const m = action.match(/:([\d.]+)$/);
   return m ? parseFloat(m[1]) : null;
 }
 
+/**
+ * 决定鼠标第一次按下时该 cell 应该被设成什么动作
+ * - Shift 强制 fold
+ * - palette 模式下用当前 palette 动作
+ * - 否则按 ACTION_CYCLE（raise→call→allin→fold→raise）循环推进
+ * @param {MouseEvent} e mousedown 事件
+ * @returns {string} 要应用的动作字符串
+ */
 function getActionForFirstClick(e) {
   if (e.shiftKey) return 'fold';
   if (state.usePalette && state.currentAction) return state.currentAction;
@@ -2625,6 +2727,11 @@ function getActionForFirstClick(e) {
   return ACTION_CYCLE[(idx + 1) % ACTION_CYCLE.length];
 }
 
+/**
+ * 网格 cell 的 mousedown 处理：起拖拽会话
+ * 记录 dragStart / dragMode（paint 或 rect）/ dragAction，立刻把动作应用到首格
+ * @param {MouseEvent} e
+ */
 function onCellMouseDown(e) {
   if (e.button !== 0) return;
   e.preventDefault();
@@ -2642,6 +2749,10 @@ function onCellMouseDown(e) {
   paintDragOverlay();
 }
 
+/**
+ * 鼠标进入新 cell 时：rect 模式下重算矩形范围并刷新；paint 模式由 document-level mousemove 处理
+ * @param {MouseEvent} e
+ */
 function onCellMouseEnter(e) {
   if (!state.isDragging) return;
   const r = +e.currentTarget.dataset.row;
@@ -2655,6 +2766,10 @@ function onCellMouseEnter(e) {
   // all cells the cursor passes over get painted via document-level mousemove
 }
 
+/**
+ * document 级 mousemove：paint 拖拽时把鼠标经过的每个 cell 都设成 dragAction
+ * @param {MouseEvent} e
+ */
 function onDocumentMouseMove(e) {
   if (!state.isDragging) return;
   if (state.dragMode !== 'paint') return;
@@ -2667,6 +2782,9 @@ function onDocumentMouseMove(e) {
   paintDragOverlay();
 }
 
+/**
+ * document 级 mouseup：结束拖拽会话，清理 dragMode/dragStart/dragAction 并隐藏 overlay
+ */
 function onDocumentMouseUp() {
   if (state.isDragging) {
     state.isDragging = false;
@@ -2677,6 +2795,15 @@ function onDocumentMouseUp() {
   }
 }
 
+/**
+ * 矩形批量涂色：把 (r1,c1)-(r2,c2) 矩形内所有 cell 都设成 action
+ * 用 state.rectPreview 跟踪"被试涂"的格子以支持撤销
+ * @param {number} r1 起点行号
+ * @param {number} c1 起点列号
+ * @param {number} r2 终点行号
+ * @param {number} c2 终点列号
+ * @param {string} action 要应用的动作
+ */
 function paintRect(r1, c1, r2, c2, action) {
   const rMin = Math.min(r1, r2), rMax = Math.max(r1, r2);
   const cMin = Math.min(c1, c2), cMax = Math.max(c1, c2);
@@ -2696,6 +2823,10 @@ function paintRect(r1, c1, r2, c2, action) {
 
 /* Visual overlay showing drag rectangle */
 let overlayEl = null;
+/**
+ * 懒创建"拖拽矩形可视化覆盖层" DOM 节点，单例
+ * @returns {HTMLElement} overlay 元素
+ */
 function ensureOverlay() {
   if (overlayEl) return overlayEl;
   overlayEl = document.createElement('div');
@@ -2712,6 +2843,10 @@ function ensureOverlay() {
   document.body.appendChild(overlayEl);
   return overlayEl;
 }
+/**
+ * 在拖拽期间更新 overlay 的位置/尺寸/颜色，反映当前矩形范围和动作
+ * 仅 rect 模式生效；非 rect 模式或未拖拽时直接返回
+ */
 function paintDragOverlay() {
   if (state.dragMode !== 'rect' || !state.isDragging) return;
   const overlay = ensureOverlay();
@@ -2740,6 +2875,9 @@ function paintDragOverlay() {
                            : state.dragAction === 'fold'  ? '#636e72'
                            : '#74b9ff';
 }
+/**
+ * 隐藏 overlay 并清空 state.rectPreview，拖拽结束或中断时调用
+ */
 function clearDragOverlay() {
   if (overlayEl) overlayEl.style.display = 'none';
   state.rectPreview = null;
@@ -2761,6 +2899,11 @@ document.addEventListener('mouseleave', () => {
 });
 
 /* ----- Drag-paint breakdown count values ----- */
+/**
+ * breakdown 表 count-cell 拖拽时 mousemove：把拖源值应用到光标下的 count cell
+ * 移动距离小于 4px 不算拖拽（避免误触）
+ * @param {MouseEvent} e
+ */
 function onCountDragMouseMove(e) {
   const drag = state.countDrag;
   if (!drag || !drag.active) return;
@@ -2777,6 +2920,10 @@ function onCountDragMouseMove(e) {
   applyCountDragToCell(key, drag.sourceValue);
 }
 
+/**
+ * breakdown 表 count-cell 拖拽结束：清理 .count-source 高亮并延迟清空 state.countDrag
+ * 延迟清理是为了让 trailing click 事件还能读取 moved 标志
+ */
 function onCountDragMouseUp() {
   const drag = state.countDrag;
   if (!drag || !drag.active) return;
@@ -2788,6 +2935,10 @@ function onCountDragMouseUp() {
 }
 
 /* ----- Drag-paint breakdown use-checkbox state ----- */
+/**
+ * breakdown 表 use-checkbox 拖拽时 mousemove：把拖源的勾选状态批量应用到经过的 cell
+ * @param {MouseEvent} e
+ */
 function onUseDragMouseMove(e) {
   const drag = state.useDrag;
   if (!drag || !drag.active) return;
@@ -2807,6 +2958,9 @@ function onUseDragMouseMove(e) {
   applyUseDragToCell(key, drag.sourceChecked);
 }
 
+/**
+ * breakdown 表 use-checkbox 拖拽结束：清理 .use-source 高亮并延迟清空 state.useDrag
+ */
 function onUseDragMouseUp() {
   const drag = state.useDrag;
   if (!drag || !drag.active) return;
@@ -2817,6 +2971,10 @@ function onUseDragMouseUp() {
 }
 
 /* ----- Grid cell context menu ----- */
+/**
+ * 网格 cell 右键菜单触发：记录右键目标为 grid 类型并在鼠标位置弹出菜单
+ * @param {MouseEvent} e
+ */
 function onCellContextMenu(e) {
   e.preventDefault();
   e.stopPropagation();
@@ -2825,12 +2983,20 @@ function onCellContextMenu(e) {
 }
 
 /* ----- Context menu ----- */
+/**
+ * 把 #ctxMenu 移动到 (x,y) 并显示
+ * @param {number} x 视口 x 坐标
+ * @param {number} y 视口 y 坐标
+ */
 function showContextMenu(x, y) {
   const menu = document.getElementById('ctxMenu');
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
   menu.style.display = 'block';
 }
+/**
+ * 隐藏右键菜单并清空 state.ctxTarget
+ */
 function hideContextMenu() {
   document.getElementById('ctxMenu').style.display = 'none';
   state.ctxTarget = null;
@@ -2879,108 +3045,138 @@ document.getElementById('quickInput').addEventListener('keypress', e => {
   if (e.key === 'Enter') quickAdd();
 });
 
+/**
+ * 把范围记号 token 展开成手牌数组，支持 + / - / 单独牌型
+ * 内部按 "-" 区间 / 对子 / 3字母带后缀 三条路径分发到对应 helper。
+ * 实际行为例（与原实现一致）：
+ *   "JJ+"     → ["AA","KK","QQ","JJ"]               ← 对子+ 从 A 向下
+ *   "AKs-AQs" → ["AKs","AQs"]                       ← 同花区间
+ *   "76s+"    → ["76s"]                              ← 注意原代码对 A?+ 类仅返回单手
+ *   "A2s+"    → ["A2s","A3s",...,"AKs"]             ← 同花+ 从 2 向上到 K
+ *   "K4s+"    → ["K4s","K5s",...,"KQs"]             ← 同花+ 从 4 向上到 Q（不含 KK）
+ * @param {string} token 范围 token（不含空格，已 trim+upper）
+ * @param {string} [defaultAction] 占位参数（保留兼容，本函数不直接使用）
+ * @returns {string[]} 展开后的手牌 key 列表
+ */
 function expandRange(token, defaultAction) {
-  token = token.trim().toUpperCase().replace(/10/g, 'T');
+  token = token.trim().toUpperCase().replace(RX_T_10, 'T');
   if (!token) return [];
+  if (token.includes('-')) return _expandRangeMinus(token);
   const plus = token.endsWith('+');
-  if (plus) token = token.slice(0, -1);
-  const results = [];
-
-  // Handle range with "-" e.g. AA-99, AKs-AQs, ATo-A9o
-  // (must come before length checks since dash makes length > 3)
-  if (token.includes('-')) {
-    const [from, to] = token.split('-').map(s => s.trim());
-    if (!from || !to) return [];
-    const fromHands = expandRange(from);  // expand endpoints as single items
-    const toHands = expandRange(to);
-    if (!fromHands.length || !toHands.length) return [];
-    const start = fromHands[0], end = toHands[0];
-    // Parse each into { rank1, rank2, suffix }
-    const parse = h => ({
-      r1: h[0], r2: h[1], suf: h[2] || null,
-    });
-    const a = parse(start), b = parse(end);
-    // Pair range "AA-99": both are pairs, same length-2
-    if (start.length === 2 && end.length === 2) {
-      const ia = RANKS.indexOf(a.r1), ib = RANKS.indexOf(b.r1);
-      if (ia === -1 || ib === -1) return [];
-      const lo = Math.max(ia, ib), hi = Math.min(ia, ib);  // AA is index 0, 99 is index 4
-      for (let j = hi; j <= lo; j++) results.push(RANKS[j] + RANKS[j]);
-      return results;
-    }
-    // Suited/offsuit range "AKs-AQs" or "ATo-A9o": same high rank, same suffix
-    if (start.length === 3 && end.length === 3 && a.suf === b.suf && a.r1 === b.r1) {
-      const i1 = RANKS.indexOf(a.r2), i2 = RANKS.indexOf(b.r2);
-      if (i1 === -1 || i2 === -1) return [];
-      // hiIdx = smaller index = higher rank (K is index 1, Q is index 2)
-      const hiIdx = Math.min(i1, i2);
-      const loIdx = Math.max(i1, i2);
-      const sufLower = a.suf.toLowerCase();
-      // AKs-AQs → [AKs, AQs] (iterate from higher rank to lower rank)
-      for (let j = hiIdx; j <= loIdx; j++) {
-        results.push(a.r1 + RANKS[j] + sufLower);
-      }
-      return results;
-    }
-    // Mixed - unsupported, just return the two endpoints
-    return [start, end];
-  }
-
-  if (token.length === 2) {
-    const r1 = token[0], r2 = token[1];
-    if (r1 === r2) {
-      // Pair like JJ
-      const i = RANKS.indexOf(r1);
-      if (i === -1) return [];
-      if (plus) {
-        for (let j = 0; j <= i; j++) results.push(RANKS[j] + RANKS[j]);
-      } else {
-        results.push(token);
-      }
-      return results;
-    }
-    // Non-pair with '+' (e.g. "A2+") means pair range from r1 down to r2 inclusive
-    if (plus) {
-      const i1 = RANKS.indexOf(r1);
-      const i2 = RANKS.indexOf(r2);
-      if (i1 === -1 || i2 === -1) return [];
-      const lo = Math.min(i1, i2);
-      const hi = Math.max(i1, i2);
-      for (let j = lo; j <= hi; j++) results.push(RANKS[j] + RANKS[j]);
-      return results;
-    }
-    return [];
-  }
-
-  if (token.length === 3) {
-    const r1 = token[0], r2 = token[1], suf = token[2];
-    const i1 = RANKS.indexOf(r1), i2 = RANKS.indexOf(r2);
-    if (i1 === -1 || i2 === -1 || i1 === i2) return [];
-    if (!['S','O'].includes(suf)) return [];
-    // Normalize: ensure big rank first, lowercase suffix
-    const highRank = i1 < i2 ? r1 : r2;
-    const lowRank  = i1 < i2 ? r2 : r1;
-    const sufLower = suf.toLowerCase();
-    const hiIdx = RANKS.indexOf(highRank);
-    const loIdx = RANKS.indexOf(lowRank);
-    const results2 = [];
-    if (plus) {
-      // AKs+ → AKs, AQs, AJs, ATs, A9s...  (high rank stays the same)
-      // AQo+ → AQo, AJo, ATo, A9o...
-      // K4s+ → K4s, K5s, K6s, ..., KQs (NOT including KK pair)
-      // Iterate from lowIdx DOWN to hiIdx+1 (exclusive of hiIdx)
-      for (let j = loIdx; j > hiIdx; j--) {
-        results2.push(highRank + RANKS[j] + sufLower);
-      }
-    } else {
-      results2.push(highRank + lowRank + sufLower);
-    }
-    return results2;
-  }
-
+  const core = plus ? token.slice(0, -1) : token;
+  if (core.length === 2) return _expandPairToken(core, plus);
+  if (core.length === 3) return _expandHandToken(core, plus);
   return [];
 }
 
+/**
+ * 处理区间语法 "AA-99"（对子区间）和 "AKs-AQs"（同花/异花区间）。
+ * 端点先各自递归展开为单手牌，再在两端之间插值。
+ * @param {string} token 已 trim+upper 的区间字符串（必须含 "-"）
+ * @returns {string[]} 区间内全部手牌 key
+ */
+function _expandRangeMinus(token) {
+  const [from, to] = token.split('-').map(s => s.trim());
+  if (!from || !to) return [];
+  const fromHands = expandRange(from);  // 递归把端点展开为单手牌
+  const toHands = expandRange(to);
+  if (!fromHands.length || !toHands.length) return [];
+  const start = fromHands[0], end = toHands[0];
+  const a = { r1: start[0], r2: start[1], suf: start[2] || null };
+  const b = { r1: end[0],   r2: end[1],   suf: end[2]   || null };
+
+  // 对子区间 "AA-99"
+  if (start.length === 2 && end.length === 2) {
+    const ia = RANKS.indexOf(a.r1), ib = RANKS.indexOf(b.r1);
+    if (ia === -1 || ib === -1) return [];
+    const lo = Math.max(ia, ib), hi = Math.min(ia, ib);  // AA 是 index 0, 99 是 index 4
+    const out = [];
+    for (let j = hi; j <= lo; j++) out.push(RANKS[j] + RANKS[j]);
+    return out;
+  }
+  // 同花/异花区间 "AKs-AQs" / "ATo-A9o"（高牌相同 + 后缀相同）
+  if (start.length === 3 && end.length === 3 && a.suf === b.suf && a.r1 === b.r1) {
+    const i1 = RANKS.indexOf(a.r2), i2 = RANKS.indexOf(b.r2);
+    if (i1 === -1 || i2 === -1) return [];
+    const hiIdx = Math.min(i1, i2);
+    const loIdx = Math.max(i1, i2);
+    const sufLower = a.suf.toLowerCase();
+    const out = [];
+    for (let j = hiIdx; j <= loIdx; j++) out.push(a.r1 + RANKS[j] + sufLower);
+    return out;
+  }
+  // 兜底：直接返回两个端点
+  return [start, end];
+}
+
+/**
+ * 处理对子 token（核心 2 字符）：
+ *   "JJ"     → ["JJ"]
+ *   "JJ+"    → ["AA","KK",...,"JJ"]（从 AA 向下到 JJ）
+ *   "A2+"    → ["AA",...,"22"]（两端都是非对子时按对子区间处理）
+ * @param {string} core 已去掉 + 后缀的对子字符串，如 "JJ"、"A2"
+ * @param {boolean} plus 是否带 + 后缀
+ * @returns {string[]} 展开后的手牌 key 列表
+ */
+function _expandPairToken(core, plus) {
+  const r1 = core[0], r2 = core[1];
+  if (r1 === r2) {
+    const i = RANKS.indexOf(r1);
+    if (i === -1) return [];
+    if (!plus) return [core];
+    const out = [];
+    for (let j = 0; j <= i; j++) out.push(RANKS[j] + RANKS[j]);
+    return out;
+  }
+  // 非对子 + 后缀：当作对子区间
+  if (plus) {
+    const i1 = RANKS.indexOf(r1);
+    const i2 = RANKS.indexOf(r2);
+    if (i1 === -1 || i2 === -1) return [];
+    const lo = Math.min(i1, i2);
+    const hi = Math.max(i1, i2);
+    const out = [];
+    for (let j = lo; j <= hi; j++) out.push(RANKS[j] + RANKS[j]);
+    return out;
+  }
+  return [];
+}
+
+/**
+ * 处理 3 字母带 s/o 后缀 token：
+ *   "AKs"   → ["AKs"]
+ *   "AKs+"  → ["AKs","AQs","AJs",...,"A2s"]（高牌不变，低牌从 K 向下）
+ *   "K4s+"  → ["K4s","K5s",...,"KQs"]（不包含 KK 对子）
+ * @param {string} core 已去掉 + 后缀的 3 字符手牌，如 "AKs"、"K4s"
+ * @param {boolean} plus 是否带 + 后缀
+ * @returns {string[]} 展开后的手牌 key 列表
+ */
+function _expandHandToken(core, plus) {
+  const r1 = core[0], r2 = core[1], suf = core[2];
+  const i1 = RANKS.indexOf(r1), i2 = RANKS.indexOf(r2);
+  if (i1 === -1 || i2 === -1 || i1 === i2) return [];
+  if (!['S','O'].includes(suf)) return [];
+  const highRank = i1 < i2 ? r1 : r2;
+  const lowRank  = i1 < i2 ? r2 : r1;
+  const sufLower = suf.toLowerCase();
+  const hiIdx = RANKS.indexOf(highRank);
+  const loIdx = RANKS.indexOf(lowRank);
+  const out = [];
+  if (plus) {
+    // 从 loIdx 向下迭代到 hiIdx+1（不包含 hiIdx 对应的对子）
+    for (let j = loIdx; j > hiIdx; j--) {
+      out.push(highRank + RANKS[j] + sufLower);
+    }
+  } else {
+    out.push(highRank + lowRank + sufLower);
+  }
+  return out;
+}
+
+/**
+ * 快速添加输入框的处理函数：解析 #quickInput 内容并按当前 action 批量写入 state.range
+ * 支持 ", " 或空白分隔的多个 token；0 命中时 placeholder 短暂提示格式错误
+ */
 function quickAdd() {
   const input = document.getElementById('quickInput');
   const raw = input.value;
@@ -2991,7 +3187,7 @@ function quickAdd() {
   tokens.forEach(t => {
     const hands = expandRange(t, action);
     hands.forEach(h => {
-      const norm = h.toUpperCase().replace(/10/g, 'T');
+      const norm = h.toUpperCase().replace(RX_T_10, 'T');
       if (action === 'fold') delete state.range[norm];
       else state.range[norm] = action;
       count++;
@@ -3017,10 +3213,68 @@ const PRESETS = {
   sb:  '22+, A2s+, K2s+, Q2s+, J8s+, T8s+, 97s+, 87s, 76s, 65s, 54s, 43s, A8o+, KTo+, K9o, QJo, QTo, Q9o, JTo, J9o, T9o, Q5s:50, Q6s:75, Q7s:90, J7s:50, 86s:50, 75s:50, A7o:50',
 };
 
-document.querySelectorAll('.preset-row button').forEach(btn => {
+// 用户自定义预设的 localStorage 存储键。
+// 注意：当前 PRESETS 格式只表达 raise:XX% 动作，因此 localStorage 中保存的预设
+// 也只能保留 raise 系列动作；fold / call / allin 在序列化时会被丢弃（保留原内存状态）。
+const LS_PRESETS_KEY = 'poker_range_presets_v1';
+
+/**
+ * 从 localStorage 读出所有已保存的自定义预设（{pos: rangeStr}）。
+ * 容错：localStorage 不可用 / JSON 损坏 / 数据格式不对时返回空对象。
+ */
+function _loadSavedPresets() {
+  try {
+    const raw = localStorage.getItem(LS_PRESETS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/**
+ * 把当前 state.range 序列化成与 PRESETS 同格式的字符串。
+ * 只保留 raise 系列动作；call / allin / fold 会被跳过（保留原内存状态，刷新即丢）。
+ * @returns {string} 例如 "JJ+, AKs, A5s:75, KQo:50"
+ */
+function _serializeRangeToString(range) {
+  const entries = [];
+  for (const [hand, action] of Object.entries(range)) {
+    if (!action) continue;
+    // 仅保留 raise 系列（call / allin 不在 PRESETS 格式里）
+    if (typeof action !== 'string' || !action.startsWith('raise')) continue;
+    const pct = getActionPercent(action);
+    entries.push(pct === null || pct >= 100 ? hand : `${hand}:${pct}`);
+  }
+  return entries.join(', ');
+}
+
+function _savePresetToLS(pos, rangeStr) {
+  const saved = _loadSavedPresets();
+  saved[pos] = rangeStr;
+  try {
+    localStorage.setItem(LS_PRESETS_KEY, JSON.stringify(saved));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function _clearAllSavedPresets() {
+  try { localStorage.removeItem(LS_PRESETS_KEY); return true; } catch (e) { return false; }
+}
+
+/** 获取某个位置的有效预设（localStorage 覆盖优先，否则回退到出厂默认值） */
+function _effectivePreset(pos) {
+  const saved = _loadSavedPresets();
+  return saved[pos] || PRESETS[pos];
+}
+
+document.querySelectorAll('.preset-row button[data-preset]').forEach(btn => {
   btn.addEventListener('click', () => {
     state.range = {};
-    const rangeStr = PRESETS[btn.dataset.preset];
+    const rangeStr = _effectivePreset(btn.dataset.preset);
     if (rangeStr) {
       const map = parseRangeString(rangeStr);
       for (const [h, pct] of map) {
@@ -3031,7 +3285,37 @@ document.querySelectorAll('.preset-row button').forEach(btn => {
   });
 });
 
+// 每个位置一个"💾"按钮：把当前 state.range 序列化后存到 localStorage
+document.querySelectorAll('.preset-row button[data-save-preset]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pos = btn.dataset.savePreset;
+    const rangeStr = _serializeRangeToString(state.range);
+    if (!rangeStr) {
+      btn.title = '当前没有 raise 动作，没东西可保存';
+      btn.textContent = '∅';
+      setTimeout(() => { btn.textContent = '💾'; btn.title = '保存当前范围为该位置预设'; }, 1200);
+      return;
+    }
+    const ok = _savePresetToLS(pos, rangeStr);
+    btn.textContent = ok ? '✓' : '✕';
+    btn.title = ok ? `已保存到 localStorage（${pos}）` : '保存失败（localStorage 不可用）';
+    setTimeout(() => { btn.textContent = '💾'; btn.title = '保存当前范围为该位置预设'; }, 1500);
+  });
+});
+
+// 一键恢复所有出厂预设
+document.getElementById('resetAllPresets').addEventListener('click', () => {
+  if (!confirm('确认清空所有自定义预设？UTG/HJ/CO/BTN/SB 五个按钮都会恢复成出厂默认。')) return;
+  _clearAllSavedPresets();
+  alert('已恢复出厂预设。');
+});
+
 /* ----- Breakdown table (now editable) ----- */
+/**
+ * 根据当前 state.tableRange 构造 breakdown 表的三列数据：对子 / 同花 / 异花
+ * 内部用 Map 去重保证每个手牌只出现一次，并按大牌在前 + 小牌升序排序
+ * @returns {{pairs: object[], suiteds: object[], offs: object[]}} 三类手牌数组
+ */
 function buildBreakdown() {
   const pairs = [], suiteds = [], offs = [];
   for (let r = 0; r < 13; r++) {
@@ -3062,6 +3346,12 @@ function buildBreakdown() {
   };
 }
 
+/**
+ * 把 buildBreakdown 的结果渲染成 breakdown 表的 DOM（tbody + 合计行）
+ * - compact 模式下隐藏三列都是 fold 的行
+ * - 每行 9 个 td：手牌 / 组合数 / 使用勾选 × 三类
+ * - 最后追加一行按类汇总的合计行
+ */
 function renderBreakdown() {
   const bd = buildBreakdown();
   const tbody = document.getElementById('breakdownBody');
@@ -3108,6 +3398,11 @@ function renderBreakdown() {
   updateUseStats();
 }
 
+/**
+ * 把一组手牌数组里"已使用且非 fold"的组合数累加，混入策略百分比 + rangeOverrides
+ * @param {Array<{key:string, action:string, count:number}>} arr buildBreakdown 返回的某类数组
+ * @returns {number} 累加后的组合数
+ */
 function sumCombos(arr) {
   // Sum of combos currently marked as used, factoring in mixed-strategy percentages
   // and any rangeOverrides (manual edit or blocker deduction)
@@ -3115,11 +3410,24 @@ function sumCombos(arr) {
             .reduce((s, x) => s + effectiveCount(x), 0);
 }
 
+/**
+ * 判断某手牌是否被用户勾选为"使用中"
+ * 默认未勾选 = 未使用（用户必须主动勾选才会计入使用占比）
+ * @param {string} key 手牌 key
+ * @returns {boolean}
+ */
 function isUsed(key) {
   // Default: not in tableUsed = not used (user must opt-in via checkbox)
   return state.tableUsed && state.tableUsed[key] === true;
 }
 
+/**
+ * 为 breakdown 表里某行生成"使用勾选" td（含 checkbox + 拖拽绑定）
+ * - fold 状态显示 "-"
+ * - 否则显示 checkbox，绑定 click/mousedown/mouseenter/change 处理
+ * @param {{key:string, action:string, count:number}|null} item 单个手牌项；null 时返回空 td
+ * @returns {HTMLTableCellElement} td 节点
+ */
 function makeUseTd(item) {
   const td = document.createElement('td');
   td.classList.add('use-cell');
@@ -3185,6 +3493,12 @@ function makeUseTd(item) {
   return td;
 }
 
+/**
+ * use-checkbox 拖拽时把拖源的勾选状态应用到目标 cell
+ * 同步更新 state.tableUsed、checkbox DOM 与 tooltip，并触发 use-dragover 高亮闪烁
+ * @param {string} key 目标手牌 key
+ * @param {boolean} sourceChecked 要应用的勾选状态
+ */
 function applyUseDragToCell(key, sourceChecked) {
   const cb = document.querySelector(`#breakdownBody td.use-cell[data-hand="${key}"] input[type=checkbox]`);
   if (!cb) return;
@@ -3204,6 +3518,14 @@ function applyUseDragToCell(key, sourceChecked) {
   updateUseStats();
 }
 
+/**
+ * 计算某个手牌在当前规则下的"有效组合数"
+ * - 优先用 state.rangeOverrides 里的手动值（如 blocker 扣除后）
+ * - 否则用 item.count（理论组合数）
+ * - 若 action 带百分比（如 raise:60），再乘以 pct/100
+ * @param {{key:string, action:string, count:number}} item 手牌项
+ * @returns {number} 实际计数的组合数
+ */
 function effectiveCount(item) {
   const base = (state.rangeOverrides && state.rangeOverrides[item.key] !== undefined)
     ? state.rangeOverrides[item.key]
@@ -3212,10 +3534,19 @@ function effectiveCount(item) {
   return pct !== null ? base * pct / 100 : base;
 }
 
+/**
+ * 数字保留两位小数的展示用格式化（避免浮点尾巴）
+ * @param {number} n
+ * @returns {number}
+ */
 function fmtCount(n) {
   return parseFloat(n.toFixed(2));
 }
 
+/**
+ * 重算并写入 breakdown 表上方的"使用统计"区域：
+ * 总使用组合 / 总范围组合 / 使用占比 / 对子/同花/异花 各自的 已用 vs 总数 / 排除数
+ */
 function updateUseStats() {
   const bd = buildBreakdown();
   const all = [...bd.pairs, ...bd.suiteds, ...bd.offs];
@@ -3251,6 +3582,14 @@ function updateUseStats() {
   exclEl.textContent = fmtCount(total - used);
 }
 
+/**
+ * 为 breakdown 表里某行生成"手牌" td：
+ * - fold 状态显示纯文本
+ * - 在范围内则带 in-range / action-* class，混合策略时附加百分比背景条
+ * 绑定 click（toggle 选中）/ dblclick（编辑）/ contextmenu（右键菜单）
+ * @param {{key:string, action:string, count:number}|null} item 手牌项
+ * @returns {HTMLTableCellElement}
+ */
 function makeHandTd(item) {
   const td = document.createElement('td');
   if (!item) return td;
@@ -3292,6 +3631,14 @@ function makeHandTd(item) {
   return td;
 }
 
+/**
+ * 为 breakdown 表里某行生成"组合数" td：
+ * - 显示 effective count（已考虑百分比和 override）
+ * - 支持 click → prompt 修改组合数（写入 rangeOverrides）
+ * - 支持 mousedown + mouseenter → 拖拽批量应用本 cell 的组合数
+ * @param {{key:string, action:string, count:number}|null} item
+ * @returns {HTMLTableCellElement}
+ */
 function makeCountTd(item) {
   const td = document.createElement('td');
   td.classList.add('count-cell');
@@ -3362,6 +3709,14 @@ function makeCountTd(item) {
   return td;
 }
 
+/**
+ * count-cell 拖拽时把拖源的有效组合数批量应用到目标 cell
+ * - 跳过不在范围内的手牌
+ * - 把 sourceValue 上限裁剪为该手牌理论最大值
+ * - 只局部更新目标 td 的 DOM（避免全表 re-render 影响拖拽流畅度）
+ * @param {string} key 目标手牌 key
+ * @param {number} sourceValue 拖源的有效组合数
+ */
 function applyCountDragToCell(key, sourceValue) {
   const action = state.tableRange[key];
   const inRange = action && action !== 'fold';
@@ -3384,6 +3739,11 @@ function applyCountDragToCell(key, sourceValue) {
   updateUseStats();
 }
 
+/**
+ * breakdown 表里某手牌的 click 处理：在范围内则清除，否则按当前 action 加入
+ * 每次切换后重渲染并更新同步信息
+ * @param {string} key 手牌 key
+ */
 function toggleHand(key) {
   if (state.tableRange[key] && state.tableRange[key] !== 'fold') {
     delete state.tableRange[key];
@@ -3394,6 +3754,13 @@ function toggleHand(key) {
   updateSyncInfo();
 }
 
+/**
+ * 双击 breakdown 表里某个手牌 td 后进入"原地编辑"模式：
+ * 把 td 内容替换成 input，blur 或 Enter 提交（用 validateHandNotation 校验），
+ * 旧 key 的状态会按需迁移到新 key
+ * @param {HTMLTableCellElement} td 被双击的 td
+ * @param {string} oldKey 该 td 当前的 key
+ */
 function startEditHand(td, oldKey) {
   td.classList.add('editing');
   const input = document.createElement('input');
@@ -3439,6 +3806,11 @@ document.querySelectorAll('.board-stage-tabs button').forEach(btn => {
   });
 });
 
+/* ----- Board ----- */
+/**
+ * 渲染公共牌区域：根据 state.stage（flop/turn/river）显示对应数量的 card-slot
+ * 已填的 slot 渲染为彩色卡片，未填的可点击打开 picker
+ */
 function renderBoard() {
   const container = document.getElementById('boardCards');
   container.innerHTML = '';
@@ -3468,6 +3840,10 @@ function renderBoard() {
   updateStats();
 }
 
+/**
+ * 打开"选公共牌"模态弹窗并预填 stage 标签，触发 buildBoardGrid 渲染选牌面板
+ * @param {number} slotIdx 当前点击的 board slot 索引
+ */
 function openPicker(slotIdx) {
   // slotIdx is optional - the new picker allows assigning cards to any empty slot
   state.editingSlot = slotIdx;
@@ -3476,8 +3852,17 @@ function openPicker(slotIdx) {
   buildBoardGrid();
   document.getElementById('modalBg').classList.add('show');
 }
+/**
+ * 关闭"选公共牌"模态弹窗（去掉 #modalBg 的 .show class）
+ */
 function closePicker() { document.getElementById('modalBg').classList.remove('show'); }
 
+/**
+ * 渲染选公共牌模态里 4×13 的牌面网格：
+ * - 已分配到当前阶段的格子：标记 assigned 并显示槽位号
+ * - 已分配到后续阶段的格子：灰禁用
+ * - 其他格子可点击（调用 onBoardCardClick）
+ */
 function buildBoardGrid() {
   const container = document.getElementById('boardGridPicker');
   container.innerHTML = '';
@@ -3534,6 +3919,14 @@ function buildBoardGrid() {
   updateBoardSelectedDisplay();
 }
 
+/**
+ * 选牌面板里某张牌被点击的处理：
+ * - 当前阶段已选 → 取消该槽位
+ * - 后续阶段已选 → 忽略
+ * - 否则填到当前阶段的第一个空槽
+ * @param {string} rank 牌面，如 "A"
+ * @param {string} suitName 花色短名 "s"/"h"/"d"/"c"
+ */
 function onBoardCardClick(rank, suitName) {
   const slotsCount = state.stage === 'flop' ? 3 : state.stage === 'turn' ? 4 : 5;
   const slotIdx = state.board.findIndex(c => c && c.rank === rank && c.suit === suitName);
@@ -3566,6 +3959,9 @@ function onBoardCardClick(rank, suitName) {
   renderBoard();
 }
 
+/**
+ * 更新 #boardSelectedDisplay 里的"已选公共牌"预览文本（含花色符号）
+ */
 function updateBoardSelectedDisplay() {
   const slotsCount = state.stage === 'flop' ? 3 : state.stage === 'turn' ? 4 : 5;
   const selected = [];
@@ -3602,6 +3998,12 @@ document.getElementById('modalBg').addEventListener('click', (e) => {
 });
 
 /* ----- Stats ----- */
+/**
+ * 重新计算并写入右侧所有统计区：
+ * - 总组合数 / 范围占比（基于 state.range）
+ * - 合法组合数（剔除与公共牌冲突的）
+ * - 击中率 / 弃牌率 / 命中率 / 顶对 / set / 两对 / 顺 / 同花 / 葫芦 / 四条（仅当有公共牌时）
+ */
 function updateStats() {
   const bd = buildBreakdown();
   const totalCombos = sumCombos(bd.pairs) + sumCombos(bd.suiteds) + sumCombos(bd.offs);
@@ -3626,6 +4028,24 @@ function updateStats() {
   const boardCards = state.board.filter(c => c).map(c => c.rank + c.suit);
   const numBoard = boardCards.length;
 
+  const combos = _buildStatsCombos(boardCards);
+  const legalCombos = combos.length;
+  document.getElementById('statOrganized').textContent = legalCombos;
+  document.getElementById('statNeeded').textContent = 1326 - legalCombos;
+
+  if (numBoard === 0) {
+    _clearBoardDependentStats();
+    return;
+  }
+
+  _renderBoardDependentStats(combos, boardCards, legalCombos);
+}
+
+/**
+ * 枚举当前 state.range 中所有非 fold 的合法组合（手牌），
+ * 排除与公共牌中具体牌重复的组合。结果直接驱动后续 stats。
+ */
+function _buildStatsCombos(boardCards) {
   const combos = [];
   for (let r1 = 0; r1 < 13; r1++) {
     for (let r2 = r1; r2 < 13; r2++) {
@@ -3673,27 +4093,32 @@ function updateStats() {
       }
     }
   }
+  return combos;
+}
 
-  const legalCombos = combos.length;
-  document.getElementById('statOrganized').textContent = legalCombos;
-  document.getElementById('statNeeded').textContent = 1326 - legalCombos;
+/**
+ * 公共牌为空时，把所有依赖牌面的统计 DOM 元素清空为 "-"
+ */
+function _clearBoardDependentStats() {
+  document.getElementById('statWinRate').textContent = '-';
+  document.getElementById('statFoldRate').textContent = '-';
+  document.getElementById('statHitRate').textContent = '-';
+  document.getElementById('statMadeHand').textContent = '-';
+  document.getElementById('statDrawHand').textContent = '-';
+  document.getElementById('statTopPair').textContent = '-';
+  document.getElementById('statSet').textContent = '-';
+  document.getElementById('statTwoPair').textContent = '-';
+  document.getElementById('statStraight').textContent = '-';
+  document.getElementById('statFlush').textContent = '-';
+  document.getElementById('statFullHouse').textContent = '-';
+  document.getElementById('statQuads').textContent = '-';
+}
 
-  if (numBoard === 0) {
-    document.getElementById('statWinRate').textContent = '-';
-    document.getElementById('statFoldRate').textContent = '-';
-    document.getElementById('statHitRate').textContent = '-';
-    document.getElementById('statMadeHand').textContent = '-';
-    document.getElementById('statDrawHand').textContent = '-';
-    document.getElementById('statTopPair').textContent = '-';
-    document.getElementById('statSet').textContent = '-';
-    document.getElementById('statTwoPair').textContent = '-';
-    document.getElementById('statStraight').textContent = '-';
-    document.getElementById('statFlush').textContent = '-';
-    document.getElementById('statFullHouse').textContent = '-';
-    document.getElementById('statQuads').textContent = '-';
-    return;
-  }
-
+/**
+ * 公共牌不为空时，分析 combos vs board 的命中/成牌/听牌概率，
+ * 把结果填进所有依赖牌面的统计 DOM 元素
+ */
+function _renderBoardDependentStats(combos, boardCards, legalCombos) {
   const stats = analyzeCombosVsBoard(combos, boardCards);
   const madePct = (stats.made / legalCombos * 100) || 0;
   const drawPct = (stats.draw / legalCombos * 100) || 0;
@@ -3716,6 +4141,15 @@ function updateStats() {
   document.getElementById('statQuads').textContent = (stats.quads / legalCombos * 100).toFixed(1) + '%';
 }
 
+/**
+ * 检查两张牌里是否有任何一张与公共牌数组冲突（同一张牌不可能出现两次）
+ * @param {string} rank1 牌1 牌面
+ * @param {string} suit1 牌1 花色短名
+ * @param {string} rank2 牌2 牌面
+ * @param {string} suit2 牌2 花色短名
+ * @param {string[]} board 公共牌字符串数组，如 ["Ah","Kd","7s"]
+ * @returns {boolean} 有冲突返回 true
+ */
 function cardsConflictWithBoard(rank1, suit1, rank2, suit2, board) {
   for (const b of board) {
     if (b === rank1 + suit1) return true;
@@ -3723,6 +4157,10 @@ function cardsConflictWithBoard(rank1, suit1, rank2, suit2, board) {
   }
   return false;
 }
+/**
+ * 等价于 cardsConflictWithBoard（保留以兼容旧调用方）
+ * @returns {boolean}
+ */
 function isBlockedByBoard(rank1, suit1, rank2, suit2, board) {
   for (const b of board) {
     if (b === rank1 + suit1) return true;
@@ -3733,6 +4171,12 @@ function isBlockedByBoard(rank1, suit1, rank2, suit2, board) {
 
 const RANK_VAL = { '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14 };
 
+/**
+ * 把所有合法 combos 与公共牌组合，统计每种牌型命中次数
+ * @param {Array<{cards:Array<{rank:string,suit:string}>, action:string}>} combos 合法 combo 列表
+ * @param {string[]} boardCards 公共牌字符串数组
+ * @returns {object} 统计结果对象（含 hit/made/draw/topPair/set/twoPair/straight/flush/fh/quads）
+ */
 function analyzeCombosVsBoard(combos, boardCards) {
   const board = boardCards.map(c => ({ rank: c[0], suit: c[1] }));
   const stats = { hit:0, made:0, draw:0, topPair:0, set:0, twoPair:0, straight:0, flush:0, fh:0, quads:0 };
@@ -3800,12 +4244,22 @@ function analyzeCombosVsBoard(combos, boardCards) {
   return stats;
 }
 
+/**
+ * 判断 unique rank 数组（已降序）里是否含 OESD（双头顺听牌：4 张连续牌差 3）
+ * @param {number[]} uniqDesc 唯一牌面值（已按降序排列，2=2 ... A=12）
+ * @returns {boolean}
+ */
 function hasOpenEndedStraight(uniqDesc) {
   for (let i = 0; i <= uniqDesc.length - 4; i++) {
     if (uniqDesc[i] - uniqDesc[i+3] === 3) return true;
   }
   return false;
 }
+/**
+ * 判断 unique rank 数组（已降序）里是否含卡顺听牌（4 张牌差 4，仅需一张补牌）
+ * @param {number[]} uniqDesc
+ * @returns {boolean}
+ */
 function hasGutshot(uniqDesc) {
   for (let i = 0; i <= uniqDesc.length - 4; i++) {
     const span = uniqDesc[i] - uniqDesc[i+3];
@@ -3815,6 +4269,10 @@ function hasGutshot(uniqDesc) {
 }
 
 /* ----- Refresh (grid only - does NOT touch the middle table) ----- */
+/**
+ * 重绘网格 DOM（每个 cell 的 class 和混合策略背景）并触发 renderBoard + syncInfo
+ * 不触碰中部分解表；如需刷新分解表请另外调用 renderBreakdown
+ */
 function refresh() {
   document.querySelectorAll('.cell').forEach(c => {
     const key = c.dataset.key;
@@ -3841,6 +4299,9 @@ function refresh() {
 }
 
 /* ----- Sync logic between grid and table ----- */
+/**
+ * 更新左下角"网格 / 表格 手牌数 + 差值提示"
+ */
 function updateSyncInfo() {
   const gridCount = Object.keys(state.range).filter(k => state.range[k] && state.range[k] !== 'fold').length;
   const tableCount = Object.keys(state.tableRange).filter(k => state.tableRange[k] && state.tableRange[k] !== 'fold').length;
@@ -3850,6 +4311,9 @@ function updateSyncInfo() {
   document.getElementById('diffHint').textContent = diff;
 }
 
+/**
+ * "←" 按钮：把网格状态完整复制到表格，覆盖现有表格内容并退出紧凑模式
+ */
 function syncFromGrid() {
   // Copy grid state → table state (left → middle).
   // Exit compact mode: the new range is unrelated to any previously filtered
@@ -3867,6 +4331,10 @@ function syncFromGrid() {
   flashButton('syncFromGridBtn');
 }
 
+/**
+ * 设置 breakdown 表的紧凑模式开关（隐藏三列都 fold 的行）并同步 #compactViewToggle
+ * @param {boolean} on true 开启紧凑视图
+ */
 function setCompactMode(on) {
   state.tableCompact = !!on;
   const toggle = document.getElementById('compactViewToggle');
@@ -3877,6 +4345,10 @@ function setCompactMode(on) {
    automatically sync the left grid state to the middle table.
    This is a one-shot - it only fires when transitioning from
    "table empty" to "table has data". */
+/**
+ * 自动同步：仅当网格有数据且表格为空时，把网格状态同步到表格（一次性）
+ * 不闪按钮，只显示 1.5s 的 ✨ 提示文字
+ */
 function maybeAutoSync() {
   const gridHas = Object.keys(state.range).length > 0;
   const tableEmpty = Object.keys(state.tableRange).length === 0;
@@ -3900,6 +4372,9 @@ function maybeAutoSync() {
   }
 }
 
+/**
+ * "→" 按钮：把表格状态复制到网格；跳过 'none' 中性状态以免污染网格
+ */
 function syncToGrid() {
   // Copy table state → grid state (middle → left). Skip 'none' (neutral reset
   // state) so hands in that state don't pollute the left grid.
@@ -3916,6 +4391,10 @@ function syncToGrid() {
   flashButton('syncToGridBtn');
 }
 
+/**
+ * "清空表格" 按钮：恢复全部 169 手牌到范围内（neutral 'none' 状态）并清空勾选
+ * 退出紧凑模式以便看到完整表格
+ */
 function clearTable() {
   // reset: restore all 169 hands to the range with a neutral 'none' action
   // (renders white in the breakdown) and clear all "use" checkboxes.
@@ -3940,6 +4419,10 @@ function clearTable() {
   }
 }
 
+/**
+ * 给指定 id 的按钮加 .flash class 并强制 reflow，700ms 后移除（实现点击闪动效果）
+ * @param {string} id 按钮 DOM id
+ */
 function flashButton(id) {
   const btn = document.getElementById(id);
   btn.classList.remove('flash');
@@ -3953,6 +4436,9 @@ document.getElementById('syncToGridBtn').addEventListener('click', syncToGrid);
 document.getElementById('clearTableBtn').addEventListener('click', clearTable);
 
 /* ----- Use-all / use-none for the table's "使用" checkboxes ----- */
+/**
+ * 把表格范围内所有手牌全部勾选为"使用中"，重渲染并刷新统计
+ */
 function useAllInTable() {
   const bd = buildBreakdown();
   const all = [...bd.pairs, ...bd.suiteds, ...bd.offs];
@@ -3965,6 +4451,9 @@ function useAllInTable() {
   flashButton('useAllTableBtn');
 }
 
+/**
+ * 清空表格所有"使用中"勾选，重渲染并刷新统计
+ */
 function useNoneInTable() {
   state.tableUsed = {};
   renderBreakdown();
@@ -3972,6 +4461,9 @@ function useNoneInTable() {
   flashButton('useNoneTableBtn');
 }
 
+/**
+ * "筛选使用中" 按钮：从表格范围中删除所有未勾选"使用"的手牌，自动进入紧凑视图
+ */
 function filterByUseInTable() {
   // 取消未勾选"使用"的组合的选中状态：从本表范围移除未勾选的组合，并自动进入紧凑模式
   const bd = buildBreakdown();
@@ -4177,6 +4669,12 @@ document.getElementById('aiRecommendTopBtn').addEventListener('click', () => aiR
 /* ----- Blocker logic: subtract combos blocked by board cards ----- */
 const SUIT_NAMES = ['s', 'h', 'd', 'c'];
 
+/**
+ * 计算指定手牌扣除公共牌阻塞后的有效组合数
+ * @param {string} handKey 手牌 key，如 "AKs"
+ * @param {Array<{rank:string,suit:string}>} boardCards 公共牌对象数组
+ * @returns {{effective:number, blocked:number, theoretical:number}} 有效/被阻塞/理论组合数
+ */
 function calculateEffectiveCombos(handKey, boardCards) {
   const theoretical = comboCount(handKey);
   if (!boardCards || boardCards.length === 0) {
@@ -4223,6 +4721,10 @@ function calculateEffectiveCombos(handKey, boardCards) {
   return { effective, blocked: theoretical - effective, theoretical };
 }
 
+/**
+ * 把表格范围内每手牌按当前公共牌扣减组合数（写入 rangeOverrides）
+ * 给出 2s 提示：扣除 N 个被阻塞组合 / 影响 M 种手牌
+ */
 function applyBlockersToTable() {
   const board = state.board.filter(c => c);
   if (board.length === 0) {
@@ -4263,6 +4765,9 @@ function applyBlockersToTable() {
   }
 }
 
+/**
+ * 清空 rangeOverrides，恢复所有手牌为理论组合数
+ */
 function resetBlockers() {
   state.rangeOverrides = {};
   renderBreakdown();
@@ -4280,6 +4785,14 @@ document.getElementById('resetBlockersBtn').addEventListener('click', resetBlock
    - If the stage is fully filled: re-roll every slot in that stage.
    Other-stage cards (e.g. turn/river) are always preserved.
 */
+/**
+ * 随机填充指定阶段（flop/turn/river）的公共牌
+ * - 若该阶段有空槽：只填空槽，保留已有牌
+ * - 若该阶段已全填：重新洗牌填所有槽
+ * - 其他阶段的牌始终保留
+ * @param {'flop'|'turn'|'river'} stage
+ * @param {string} btnId 触发按钮 id（用于闪动效果）
+ */
 function randomStage(stage, btnId) {
   const slotsForStage = stage === 'flop' ? [0,1,2] : stage === 'turn' ? [3] : [4];
 
@@ -4324,6 +4837,9 @@ function randomStage(stage, btnId) {
   flashButton(btnId);
 }
 
+/**
+ * 清空全部公共牌（5 个槽位都置 null）并刷新
+ */
 function clearBoard() {
   state.board = [null, null, null, null, null];
   renderBoard();
@@ -4801,6 +5317,13 @@ const RANGE_DB = {
 // Supports: "A2s:60" (60% open), "AKs" (=100%), "A2s+" (=100%), tokens comma/space separated.
 // Earlier tokens' percentages override later tokens for the same hand.
 // NOTE: 支持小数百分比（如 K6s:5.8）依赖 parseFloat，修改时请同步测试。
+/**
+ * 把范围字符串解析成 Map<hand, percent>（0-100）
+ * 支持 "A2s:60"、"AKs"、"A2s+"，按逗号/空白切分
+ * 后出现的 token 覆盖前面的同名手牌
+ * @param {string} rangeStr 范围字符串
+ * @returns {Map<string, number>} 手牌 → 开池百分比
+ */
 function parseRangeString(rangeStr) {
   const map = new Map();
   if (!rangeStr) return map;
@@ -4825,6 +5348,11 @@ function parseRangeString(rangeStr) {
 }
 
 // Legacy compatibility: returns Array<string> of full-open hands from a range string
+/**
+ * 旧 API 兼容：仅返回百分比 > 0 的手牌 key 数组
+ * @param {string} rangeStr
+ * @returns {string[]}
+ */
 function parseRangeStringLegacy(rangeStr) {
   const m = parseRangeString(rangeStr);
   const hands = [];
@@ -4832,6 +5360,13 @@ function parseRangeStringLegacy(rangeStr) {
   return hands;
 }
 
+/**
+ * 把范围字符串合并写入 state.range（不覆盖未在字符串里的手牌）
+ * 带百分比的手牌写成 "action:pct"，100% 写为纯动作
+ * @param {string} rangeStr 范围字符串
+ * @param {string} [action='raise'] 动作名
+ * @returns {number} 写入的手牌数
+ */
 function applyRange(rangeStr, action) {
   const map = parseRangeString(rangeStr);
   // Clear current range first? No - merge. Just update hands in the range.
@@ -4843,6 +5378,12 @@ function applyRange(rangeStr, action) {
   return map.size;
 }
 
+/**
+ * 用范围字符串替换（清空后写入）state.range
+ * @param {string} rangeStr
+ * @param {string} [action='raise']
+ * @returns {number} 写入的手牌数
+ */
 function setRangeFromString(rangeStr, action) {
   // Clear and apply new range
   state.range = {};
@@ -4855,10 +5396,19 @@ function setRangeFromString(rangeStr, action) {
   return map.size;
 }
 
+/**
+ * 取出 AI 反馈浮层的 DOM 节点
+ * @returns {HTMLElement|null}
+ */
 function getAiFeedbackEl() {
   return document.getElementById('aiFeedback');
 }
 
+/**
+ * 在 AI 反馈浮层显示一条消息，5 秒后自动隐藏
+ * @param {string} msg 消息文本
+ * @param {string} [type] 类型（success/error/warn/info 等），用于附加 class
+ */
 function showAiFeedback(msg, type) {
   const el = getAiFeedbackEl();
   el.textContent = msg;
@@ -4943,6 +5493,13 @@ const NL_PATTERNS = {
   '全下': 'push', 'push': 'push', '全推进': 'push',
 };
 
+/**
+ * 规则化"自然语言 → 牌局三元组"解析器
+ * 顺序：先匹配 gameType → 再 position → 再 situation，全部按最长 key 优先
+ * 短英文 key 用单词边界正则，避免 "MP3" 这种误匹配
+ * @param {string} text 用户输入的描述
+ * @returns {{gameType:string, position:string, situation:string}} 解析出的三元组
+ */
 function parseNaturalLanguage(text) {
   const lower = text.toLowerCase().trim();
   let gameType = '6max-100bb';  // default
@@ -5059,12 +5616,20 @@ const DEFAULT_MINIMAX_MODEL = 'MiniMax-M3';
 const DEFAULT_MINIMAX_BASE = 'https://api.minimax.cn/anthropic/v1/messages';
 
 // 统一的 Key/Model/Base URL 读取（含 localStorage fallback 和空值提示）
+/**
+ * 集中读取 LLM API 凭证：优先 localStorage，其次面板输入框，最后默认
+ * @returns {{apiKey:string, model:string, baseUrl:string}}
+ */
 function getApiCreds() {
   const apiKey = (localStorage.getItem('poker_ai_apikey') || document.getElementById('apiKeyInput')?.value || '').trim();
   const model = (document.getElementById('apiModelInput')?.value || DEFAULT_MINIMAX_MODEL).trim();
   const baseUrl = (document.getElementById('apiBaseInput')?.value || DEFAULT_MINIMAX_BASE).trim();
   return { apiKey, model, baseUrl };
 }
+/**
+ * 确保已有 API Key：若无则弹窗要求输入
+ * @returns {boolean} 有 Key 返回 true
+ */
 function ensureApiKey() {
   const { apiKey } = getApiCreds();
   if (!apiKey) {
@@ -5079,6 +5644,10 @@ function ensureApiKey() {
    留空时使用此默认；点击"恢复默认"按钮可重置。 */
 const DEFAULT_SYSTEM_PROMPT = '你是一名专业、严谨的德州扑克（Texas Hold\'em）GTO 顾问，熟悉 GTO Wizard、PioSOLVER、GTO+ 等求解器输出。回答时使用 GTO 框架，引用具体百分比和频率时给出依据。回答简洁，使用中文，专精 cash 6-max/9-max 与 MTT 决策。在输出范围时使用 :百分比 格式标注边缘组合的混合开池概率，例如 K6s:75 代表 75% 开池、25% 弃牌。';
 
+/**
+ * 返回当前生效的系统提示词：优先用面板输入值，否则用 DEFAULT_SYSTEM_PROMPT
+ * @returns {string}
+ */
 function getEffectiveSystemPrompt() {
   const el = document.getElementById('apiSystemPromptInput');
   const userValue = el?.value?.trim();
@@ -5087,6 +5656,10 @@ function getEffectiveSystemPrompt() {
 
 /* ----- API Key 加载：优先 localStorage，没有则弹窗要求输入 -----
    安全原则：源码中不硬编码 key，仅在用户浏览器 localStorage 中保存 */
+/**
+ * 页面启动时加载 localStorage 里的 API 配置（key/model/baseUrl/systemPrompt）；
+ * 若没有 key 则弹出输入弹窗
+ */
 function loadOrPromptApiKey() {
   const savedKey = localStorage.getItem('poker_ai_apikey');
   const savedModel = localStorage.getItem('poker_ai_model');
@@ -5108,6 +5681,10 @@ function loadOrPromptApiKey() {
   }
 }
 
+/**
+ * 弹出 API Key 输入遮罩：保存后写 localStorage 并填回面板
+ * 支持 Enter 保存、点击外部关闭、"稍后"按钮跳过
+ */
 function promptForApiKey() {
   // 移除已存在的弹窗（避免重复）
   const existing = document.getElementById('apiKeyModal');
@@ -5191,6 +5768,14 @@ if (_sysClearBtn) _sysClearBtn.addEventListener('click', () => {
 });
 
 /* ----- LLM API integration (Anthropic-compatible) ----- */
+/**
+ * 调用 LLM（Anthropic 兼容协议）让模型直接给出范围字符串
+ * @param {string} apiKey
+ * @param {string} model
+ * @param {string} userText 用户输入的自然语言描述
+ * @param {{gameType:string, position:string, situation:string}} parsed 解析后的三元组
+ * @returns {Promise<string|null>} 解析出的范围字符串（可能为 null）
+ */
 async function callLLM(apiKey, model, userText, parsed) {
   const prompt = `你是一名德州扑克（Texas Hold'em）GTO 顾问。基于以下牌局情境，输出建议的开牌/行动范围，格式为简洁的逗号分隔的手牌表达列表。
 
@@ -5388,17 +5973,31 @@ const HAND_DATA = [
 let rankingSortKey = 'equity';
 let rankingSortDir = -1; // -1 = desc, 1 = asc
 
+/**
+ * 把手牌 key 映射到 CSS class 名（pair/suited/offsuit），用于 rankings 表着色
+ * @param {string} hand 手牌 key
+ * @returns {'pair'|'suited'|'offsuit'}
+ */
 function getHandClass(hand) {
   if (hand.length === 2) return 'pair';
   if (hand.endsWith('s')) return 'suited';
   return 'offsuit';
 }
+/**
+ * 把 hand key 翻译成中文类型描述（"对子"/"同花"/"非同花"），用于 rankings 表
+ * @param {string} hand
+ * @returns {string}
+ */
 function getHandType(hand) {
   if (hand.length === 2) return '对子';
   if (hand.endsWith('s')) return '同花';
   return '非同花';
 }
 
+/**
+ * 渲染手牌排名表：按当前排序键和方向展示 HAND_DATA
+ * 若勾选了"仅显示范围内"，会过滤掉不在 state.range 里的手牌
+ */
 function renderRankings() {
   const tbody = document.getElementById('rankingsBody');
   tbody.innerHTML = '';
@@ -5452,6 +6051,9 @@ document.getElementById('showOnlyInRange').addEventListener('change', renderRank
 /* ============================================================
    Tool: Pot Odds Calculator
    ============================================================ */
+/**
+ * 重算并写入 Pot Odds 工具面板：所需赔率 / 多街累计 / Implied Odds 反推 / M-Zone 提示
+ */
 function updatePotOdds() {
   const pot = parseFloat(document.getElementById('poPot').value) || 0;
   const call = parseFloat(document.getElementById('poCall').value) || 0;
@@ -5512,6 +6114,10 @@ const OUTS_OPTIONS = [
   { name:'自定义', outs:0, desc:'输入自定义 outs 数' },
 ];
 
+/**
+ * 渲染 Outs 工具面板的快捷选项网格（OESD / 同花听牌 / 自定义...）
+ * "自定义" 选项额外渲染一个数字输入框
+ */
 function renderOutsGrid() {
   const grid = document.getElementById('outsGrid');
   grid.innerHTML = '';
@@ -5541,6 +6147,9 @@ function renderOutsGrid() {
   grid.firstChild.classList.add('selected');
 }
 
+/**
+ * 重算 Outs 工具面板：turn 单街命中率 / river 两街累计命中率 / Rule of 2/4 近似
+ */
 function updateOuts() {
   const sel = document.querySelector('.outs-option.selected');
   let outs = 0;
@@ -5596,6 +6205,10 @@ const POSITION_INFO = {
 let posCount = 6;
 let selectedPos = null;
 
+/**
+ * 渲染 Position Clock 工具面板的牌桌座位布局（6-max / 9-max）
+ * 每个座位可点击触发 selectPos 显示对应位置信息
+ */
 function renderPositionTable() {
   const table = document.getElementById('positionTable');
   table.innerHTML = '';
@@ -5646,6 +6259,11 @@ function renderPositionTable() {
   });
 }
 
+/**
+ * 选中某个位置后更新位置说明面板
+ * @param {string} posId 位置 key，如 'UTG'、'HJ'
+ * @param {HTMLElement} [div] 被点击的座位节点（可为 null）
+ */
 function selectPos(posId, div) {
   document.querySelectorAll('.position-seat').forEach(s => s.classList.remove('active'));
   if (div) div.classList.add('active');
@@ -5696,6 +6314,10 @@ const PUSHFOLD_DATA = {
 let pfBB = 5;
 let pfPos = 'btn';
 
+/**
+ * 渲染 Push/Fold 工具面板：按当前位置 + BB 深度从 PUSHFOLD_DATA 取数据
+ * 把推荐 push 的手牌按 equity 排序显示，并附上剩余弃牌列表
+ */
 function renderPushFold() {
   const table = document.getElementById('pushfoldTable');
   // Sort hands by rank
@@ -5755,6 +6377,12 @@ function renderPushFold() {
   document.getElementById('pushfoldBody').previousElementSibling || null;
 }
 
+/**
+ * 给 Push/Fold 表生成单个手牌 td（含 chip + 颜色 + EQ 标签）
+ * @param {{h:string, eq:number, mw:number, cls:number}} h HAND_DATA 项
+ * @param {boolean} isPush true → push 类，false → fold 类
+ * @returns {HTMLTableCellElement}
+ */
 function makePFCell(h, isPush) {
   const td = document.createElement('td');
   td.className = isPush ? 'push' : 'fold';
@@ -5818,11 +6446,17 @@ const battle = {
   total: 0,
 };
 
+/**
+ * 把 "AKo" 这类手牌记号拆成 {big, small, suf} 字段
+ * 不能识别的输入原样返回
+ * @param {string} hand
+ * @returns {{big:string, small:string, suf:string}|string}
+ */
 function fmtCardNotation(hand) {
   // "AKo" → render two card chips, etc.
   // Falls back to plain text for ambiguous input
   if (!hand || hand.length < 2) return hand || '';
-  const m = hand.match(/^([2-9TJQKA])([2-9TJQKA])([so])?$/i);
+  const m = hand.match(RX_HAND_2);
   if (!m) return hand;
   const r1 = m[1].toUpperCase().replace('10','T');
   const r2 = m[2].toUpperCase().replace('10','T');
@@ -5833,10 +6467,17 @@ function fmtCardNotation(hand) {
   return { big, small, suf };
 }
 
+/**
+ * 把手牌字符串渲染成带颜色 chip 的 HTML
+ * - 支持 4 字符 "AhKh"（精确花色）
+ * - 支持 2 字符 "AKo" / "AKs"（花色用红♥ / 黑♣ 占位）
+ * @param {string} hand
+ * @returns {string} HTML 字符串
+ */
 function renderHandChips(hand) {
   if (!hand) return '';
   // Form A: 4-letter "AhKh" / "AsKd" — already has suits
-  const m4 = hand.match(/^([2-9TJQKA])([shdc])([2-9TJQKA])([shdc])$/i);
+  const m4 = hand.match(RX_HAND_4);
   if (m4) {
     const r1 = m4[1].toUpperCase(), s1 = m4[2].toLowerCase();
     const r2 = m4[3].toUpperCase(), s2 = m4[4].toLowerCase();
@@ -5845,7 +6486,7 @@ function renderHandChips(hand) {
     </span>`;
   }
   // Form B: 2-letter "AKo" / "AKs" / "AA" — suit implied
-  const m2 = hand.match(/^([2-9TJQKA])([2-9TJQKA])([so])?$/i);
+  const m2 = hand.match(RX_HAND_2);
   if (m2) {
     const r1 = m2[1].toUpperCase();
     const r2 = m2[2].toUpperCase();
@@ -5867,11 +6508,16 @@ function renderHandChips(hand) {
   return `<span class="hand-display">${hand}</span>`;
 }
 
+/**
+ * 把公共牌字符串（"Ah Kd 7s"）渲染成一行带颜色 chip 的 HTML
+ * @param {string} board 空白/逗号分隔的牌字符串
+ * @returns {string} HTML 字符串
+ */
 function renderBoardChips(board) {
   if (!board) return '<span class="board-display">(无)</span>';
-  const cards = board.split(/[\s,]+/).filter(Boolean);
+  const cards = board.split(RX_BOARD_SPLIT).filter(Boolean);
   return '<span class="board-display">' + cards.map(c => {
-    const m = c.match(/^([2-9TJQKA])([shdc])$/i);
+    const m = c.match(RX_CARD);
     if (!m) return c;
     const rank = m[1].toUpperCase();
     const suit = m[2].toLowerCase();
@@ -5879,6 +6525,11 @@ function renderBoardChips(board) {
   }).join(' ') + '</span>';
 }
 
+/**
+ * 把花色短名映射成 unicode 花色符号
+ * @param {string} s 's'/'h'/'d'/'c'
+ * @returns {string} '♠'/'♥'/'♦'/'♣'（未知输入返回 ♣）
+ */
 function getSuitSymbol(s) {
   return s === 's' ? '♠' : s === 'h' ? '♥' : s === 'd' ? '♦' : '♣';
 }
@@ -5900,6 +6551,12 @@ const POS_DISPLAY = {
 };
 const POS_ALIAS = { mp: 'hj' }; // legacy alias
 
+/**
+ * 把外部传入的位置字符串（可能是大写/中文/旧别名）规范成标准 key
+ * 例: "MP" → "hj"、"utg" → "utg"
+ * @param {string} p
+ * @returns {string|null}
+ */
 function normalizePosKey(p) {
   if (!p) return null;
   const k = String(p).toLowerCase().trim();
@@ -5907,6 +6564,12 @@ function normalizePosKey(p) {
 }
 
 /** Build a ring of seats for the given game type. */
+/**
+ * 根据游戏类型返回座位环数组（含 key 和相对桌面的角度）
+ * 支持 hu-*, 9max-*, 其他（含 6max / mtt）走默认 6-max 布局
+ * @param {string} gameType 例如 '6max-100bb'、'9max-100bb'、'hu-100bb'
+ * @returns {Array<{key:string, angle:number}>}
+ */
 function buildSeatRing(gameType) {
   const gt = (gameType || '6max-100bb').toLowerCase();
   if (gt.startsWith('hu')) {
@@ -5941,6 +6604,12 @@ function buildSeatRing(gameType) {
 }
 
 /** Parse free-text villainAction into a list of {pos, action, amount}. */
+/**
+ * 把 "UTG 加注到 2.5BB" 这类自由文本解析成结构化动作数组
+ * 支持中英文动作名、位置别名、可选 BB 金额
+ * @param {string} text 自由文本
+ * @returns {Array<{pos:string, action:string, amount:number|null, raw:string}>}
+ */
 function parseVillainActions(text) {
   const out = [];
   if (!text || typeof text !== 'string') return out;
@@ -5977,6 +6646,12 @@ function parseVillainActions(text) {
  *  @param {object} s - scenario
  *  @param {number} [overridePot] - if provided, use this potBB instead of computing from actions
  */
+/**
+ * 渲染对战场景的 2D 牌桌 HTML（含座位环、公共牌、底池、玩家动作标签、图例）
+ * @param {object} s scenario 对象（含 gameType/position/hand/board/stackBB/villainAction）
+ * @param {number} [overridePot] 若提供则覆盖从 villainAction 推算的底池
+ * @returns {string} HTML 字符串
+ */
 function renderBattleTable(s, overridePot) {
   const seats = buildSeatRing(s.gameType);
   const posKey = normalizePosKey(s.position);
@@ -5987,22 +6662,7 @@ function renderBattleTable(s, overridePot) {
   const actionByPos = {};
   for (const a of actions) actionByPos[a.pos] = a;
 
-  // Pot: 优先用外部传入的修正值（与左下角信息卡同步），否则用启发式估算
-  let pot = 0;
-  if (typeof overridePot === 'number' && overridePot > 0) {
-    pot = overridePot;
-  } else {
-    // Compute pot from bet amounts (very rough heuristic)
-    for (const a of actions) {
-      if (a.amount && a.action !== 'fold') pot += a.amount;
-    }
-    // Include blinds if SB/BB folded (just call), otherwise only counted
-    if (!actionByPos.sb && seats.some(x => x.key === 'sb')) pot += 0.5;
-    if (!actionByPos.bb && seats.some(x => x.key === 'bb')) pot += 1;
-    // If a raise happened, SB+BB blinds are part of the raise target
-    const lastRaise = actions.filter(a => a.action === 'raise' || a.action === '3-bet' || a.action === '4-bet').slice(-1)[0];
-    if (lastRaise && lastRaise.amount && !pot) pot = lastRaise.amount;
-  }
+  const pot = _computeBattlePot(s, actions, actionByPos, seats, overridePot);
 
   // Hero's hand chips
   const posInSeats = seats.some(x => x.key === posKey);
@@ -6017,59 +6677,9 @@ function renderBattleTable(s, overridePot) {
     boardHtml = '<span class="battle-table-board-empty">翻牌前 (无公共牌)</span>';
   }
 
-  const seatsHtml = seats.map(seat => {
-    const k = seat.key;
-    const isHero = (k === posKey);
-    const a = actionByPos[k];
-    let actionHtml = '';
-    let folded = false;
-    if (a) {
-      if (a.action === 'fold') {
-        actionHtml = `<div class="seat-action fold">弃牌</div>`;
-        folded = true;
-      } else if (a.action === 'call') {
-        actionHtml = `<div class="seat-action call">跟注${a.amount ? ' '+a.amount+'BB' : ''}</div>`;
-      } else if (a.action === 'raise') {
-        actionHtml = `<div class="seat-action raise">加注${a.amount ? ' '+a.amount+'BB' : ''}</div>`;
-      } else if (a.action === '3-bet') {
-        actionHtml = `<div class="seat-action threebet">3-bet${a.amount ? ' '+a.amount+'BB' : ''}</div>`;
-      } else if (a.action === '4-bet') {
-        actionHtml = `<div class="seat-action reraise">4-bet${a.amount ? ' '+a.amount+'BB' : ''}</div>`;
-      } else if (a.action === 'allin') {
-        actionHtml = `<div class="seat-action allin">全下${a.amount ? ' '+a.amount+'BB' : ''}</div>`;
-      } else if (a.action === 'bet') {
-        actionHtml = `<div class="seat-action bet">下注${a.amount ? ' '+a.amount+'BB' : ''}</div>`;
-      }
-    } else if (k === 'sb' || k === 'bb') {
-      // Default: blind posted
-      const blind = (k === 'sb') ? '0.5' : '1';
-      actionHtml = `<div class="seat-action call">盲注 ${blind}BB</div>`;
-    }
-
-    // Cards: hero's hand; others hidden preflop, otherwise empty
-    let cardsHtml = '';
-    if (isHero && s.hand) {
-      cardsHtml = `<div class="seat-cards">${heroCardsHtml}</div>`;
-    }
-
-    const classes = ['battle-seat'];
-    if (isHero) classes.push('hero');
-    if (folded) classes.push('folded');
-
-    // Convert angle to top/left % (oval mapping)
-    const rad = seat.angle * Math.PI / 180;
-    // X: horizontal radius 45%, Y: vertical radius 40% (oval)
-    const x = 50 + 45 * Math.cos(rad);
-    const y = 50 - 40 * Math.sin(rad);
-
-    return `
-      <div class="${classes.join(' ')}" style="left:${x.toFixed(1)}%; top:${y.toFixed(1)}%;">
-        <div class="seat-name">${POS_DISPLAY[k] || k.toUpperCase()}</div>
-        <div class="seat-stack">${stackBB} BB</div>
-        ${actionHtml}
-        ${cardsHtml}
-      </div>`;
-  }).join('');
+  const seatsHtml = seats.map(seat =>
+    _renderBattleSeat(seat, actionByPos, posKey, s.hand, heroCardsHtml, stackBB)
+  ).join('');
 
   return `
     <div class="battle-table-wrap">
@@ -6092,6 +6702,100 @@ function renderBattleTable(s, overridePot) {
   `;
 }
 
+/**
+ * 估算/读取对战场景的当前底池：
+ *   1. 优先用外部 overridePot（与左下角信息卡同步），否则
+ *   2. 启发式：累加各位置下注/跟注额 + SB/BB 盲注 + 最近一次 raise 兜底
+ */
+function _computeBattlePot(s, actions, actionByPos, seats, overridePot) {
+  if (typeof overridePot === 'number' && overridePot > 0) return overridePot;
+  let pot = 0;
+  for (const a of actions) {
+    if (a.amount && a.action !== 'fold') pot += a.amount;
+  }
+  if (!actionByPos.sb && seats.some(x => x.key === 'sb')) pot += 0.5;
+  if (!actionByPos.bb && seats.some(x => x.key === 'bb')) pot += 1;
+  const lastRaise = actions
+    .filter(a => a.action === 'raise' || a.action === '3-bet' || a.action === '4-bet')
+    .slice(-1)[0];
+  if (lastRaise && lastRaise.amount && !pot) pot = lastRaise.amount;
+  return pot;
+}
+
+/**
+ * 把单个座位渲染成 2D 牌桌上的 div：
+ *   位置 + 筹码 + 动作 chip + （hero 时）手牌
+ * 座位坐标按椭圆映射：水平半径 45%，垂直半径 40%
+ */
+function _renderBattleSeat(seat, actionByPos, heroPosKey, heroHandRaw, heroCardsHtml, stackBB) {
+  const k = seat.key;
+  const isHero = (k === heroPosKey);
+  const a = actionByPos[k];
+
+  const { html: actionHtml, folded } = _renderBattleActionLabel(a, k);
+
+  // Cards: hero's hand; others hidden preflop, otherwise empty
+  let cardsHtml = '';
+  if (isHero && heroHandRaw) {
+    cardsHtml = `<div class="seat-cards">${heroCardsHtml}</div>`;
+  }
+
+  const classes = ['battle-seat'];
+  if (isHero) classes.push('hero');
+  if (folded) classes.push('folded');
+
+  // Convert angle to top/left % (oval mapping)
+  const rad = seat.angle * Math.PI / 180;
+  const x = 50 + 45 * Math.cos(rad);
+  const y = 50 - 40 * Math.sin(rad);
+
+  return `
+    <div class="${classes.join(' ')}" style="left:${x.toFixed(1)}%; top:${y.toFixed(1)}%;">
+      <div class="seat-name">${POS_DISPLAY[k] || k.toUpperCase()}</div>
+      <div class="seat-stack">${stackBB} BB</div>
+      ${actionHtml}
+      ${cardsHtml}
+    </div>`;
+}
+
+/**
+ * 把单个位置的 villain 行动渲染成动作 chip HTML。
+ * 返回 { html, folded } — folded 用于给座位加 .folded 样式
+ * 未显式行动且是 SB/BB 时默认显示盲注
+ */
+function _renderBattleActionLabel(a, posKey) {
+  let html = '';
+  let folded = false;
+  if (a) {
+    const amt = a.amount ? ' ' + a.amount + 'BB' : '';
+    if (a.action === 'fold') {
+      html = `<div class="seat-action fold">弃牌</div>`;
+      folded = true;
+    } else if (a.action === 'call') {
+      html = `<div class="seat-action call">跟注${amt}</div>`;
+    } else if (a.action === 'raise') {
+      html = `<div class="seat-action raise">加注${amt}</div>`;
+    } else if (a.action === '3-bet') {
+      html = `<div class="seat-action threebet">3-bet${amt}</div>`;
+    } else if (a.action === '4-bet') {
+      html = `<div class="seat-action reraise">4-bet${amt}</div>`;
+    } else if (a.action === 'allin') {
+      html = `<div class="seat-action allin">全下${amt}</div>`;
+    } else if (a.action === 'bet') {
+      html = `<div class="seat-action bet">下注${amt}</div>`;
+    }
+  } else if (posKey === 'sb' || posKey === 'bb') {
+    // 默认显示盲注
+    const blind = (posKey === 'sb') ? '0.5' : '1';
+    html = `<div class="seat-action call">盲注 ${blind}BB</div>`;
+  }
+  return { html, folded };
+}
+
+/**
+ * 出题按钮入口：校验 API Key → 调 LLM 出对战场景 → 解析（含截断修复）→ 渲染
+ * 出错时在 #battleStage 显示错误信息并恢复按钮状态
+ */
 async function startBattle() {
   const btn = document.getElementById('battleStartBtn');
   const next = document.getElementById('battleNextBtn');
@@ -6265,6 +6969,13 @@ async function startBattle() {
 }
 
 // 解析 AI 返回的场景 JSON（greedy 匹配 → 截断修复）
+/**
+ * 解析 AI 返回的场景 JSON：先 greedy 匹配首个完整对象，否则非 greedy 匹配；
+ * 若 AI 响应被截断，则尝试用 repairTruncatedJson 修复后再次解析
+ * @param {string} raw AI 原始输出
+ * @param {boolean} truncated 是否被 max_tokens 截断
+ * @returns {object|null} 解析出的场景对象
+ */
 function parseBattleScenario(raw, truncated) {
   if (!raw) return null;
   // 1) 尝试完整 greedy 匹配
@@ -6293,6 +7004,13 @@ function parseBattleScenario(raw, truncated) {
 // 截断 JSON 修复：用状态机扫描，找到最后一个语法稳定的位置，补齐缺失的括号和字符串。
 // 状态机跟踪：字符串内/外、深度、转义。
 // 稳定点 = 字符串外、刚结束一个完整的 key:value 或数组元素的边界。
+/**
+ * 修复被 max_tokens 截断的 JSON 字符串：
+ * 状态机跟踪 inString/escape/depth/bracketDepth，记录最后一个语法稳定点，
+ * 截断到那里后再补齐缺失的 ']' 和 '}'
+ * @param {string} partial 从首个 { 开始的 JSON 子串
+ * @returns {string|null} 修复结果；无法修复时返回 null
+ */
 function repairTruncatedJson(partial) {
   let depth = 0;          // {} 嵌套深度
   let bracketDepth = 0;   // [] 嵌套深度
@@ -6348,13 +7066,21 @@ function repairTruncatedJson(partial) {
 
 // 校验对战场景的内部一致性
 // 返回 { warning: string|null } — 当 potBB 与 preflopAction 明显不一致时给出警告
+/**
+ * 校验 AI 出题的内部一致性：
+ * - 根据 preflopAction 推算最小 potBB，与 s.potBB 对比；不一致时给出 warning + correctedPotBB
+ * - 检查手牌 4 字符形式与 board 是否冲突
+ * - 检查 board 内部是否重复
+ * @param {object} s scenario 对象
+ * @returns {{warning:string|null, correctedPotBB?:number}}
+ */
 function validateBattleScenario(s) {
   const out = { warning: null };
   const potBB = (typeof s.potBB === 'number') ? s.potBB : null;
   const preflop = (s.preflopAction || '').toString();
   if (!preflop || potBB === null) return out;
 
-  // 抽取翻前所有"加注到 X" / "3-bet 到 X" / "跟注 X" 的最大金额
+  // 从翻前文本里抽取所有"加注到 X / 跟注 X / limp"的金额
   const raiseTo = [];
   const re = /加注到\s*([\d.]+)\s*BB|[345]-bet\s*到\s*([\d.]+)\s*BB|跟注\s*([\d.]+)\s*BB|limp|跟注\s*1BB/gi;
   let m;
@@ -6402,32 +7128,48 @@ function validateBattleScenario(s) {
       ? uniqueParticipants.join('/') + ` 跟到 ${maxRaise}BB`
       : `无人在局（max raise = ${maxRaise}BB）`;
     out.warning = `AI 报告 potBB = ${potBB.toFixed(1)} BB，但翻前行动 "${preflop}" 表明 ${partsList}，底池应 ≥ ${minPot.toFixed(1)} BB。已自动修正显示。`;
-    // 提供修正后的底池值：翻前 pot + 翻后街 villainAction 中的下注/跟注额
-    let correctedPot = minPot;
-    const boardCards = (s.board || '').toString().split(/[\s,]+/).filter(Boolean);
-    const isPostflop = (s.street && s.street !== 'preflop') || boardCards.length >= 3;
-    if (isPostflop) {
-      const villain = (s.villainAction || '').toString();
-      if (villain) {
-        // 抽取所有显式带数字的 BB 金额（"下注 X BB" / "(X BB)" 等）
-        const bbRe = /([\d.]+)\s*BB/gi;
-        const bbAmounts = [];
-        let bm;
-        while ((bm = bbRe.exec(villain)) !== null) {
-          bbAmounts.push(parseFloat(bm[1]));
-        }
-        correctedPot += bbAmounts.reduce((a, b) => a + b, 0);
-        // 对"跟注"/"call"没带数字的情况，按最近一次下注的金额补齐
-        const unnamedCalls = (villain.match(/(?:跟注|call)(?!\s*[\d.])/gi) || []).length;
-        const lastBet = bbAmounts.length ? bbAmounts[bbAmounts.length - 1] : 0;
-        if (lastBet > 0 && unnamedCalls > 0) correctedPot += lastBet * unnamedCalls;
-      }
-    }
-    out.correctedPotBB = correctedPot;
+    out.correctedPotBB = _computeCorrectedPotPostflop(s, minPot);
   }
 
-  // 重复牌检测：手牌 4字母形式 vs 公共牌（同一张牌不能既在手里又在牌面）
-  const hand4 = (s.hand || '').match(/^([2-9TJQKA])([shdc])([2-9TJQKA])([shdc])$/i);
+  _checkBattleDuplicateCards(s, out);
+  return out;
+}
+
+/**
+ * 在已计算的翻前最小底池基础上，把翻后街 villainAction 中的下注/跟注额累加上。
+ * 处理两种情况：
+ *   1. 显式带数字的 BB 金额（"下注 X BB" / "(X BB)" 等）
+ *   2. "跟注" / "call" 没带数字时，按最近一次下注的金额补齐
+ */
+function _computeCorrectedPotPostflop(s, minPot) {
+  let pot = minPot;
+  const boardCards = (s.board || '').toString().split(/[\s,]+/).filter(Boolean);
+  const isPostflop = (s.street && s.street !== 'preflop') || boardCards.length >= 3;
+  if (!isPostflop) return pot;
+
+  const villain = (s.villainAction || '').toString();
+  if (!villain) return pot;
+
+  const bbRe = /([\d.]+)\s*BB/gi;
+  const bbAmounts = [];
+  let bm;
+  while ((bm = bbRe.exec(villain)) !== null) bbAmounts.push(parseFloat(bm[1]));
+  pot += bbAmounts.reduce((a, b) => a + b, 0);
+
+  const unnamedCalls = (villain.match(/(?:跟注|call)(?!\s*[\d.])/gi) || []).length;
+  const lastBet = bbAmounts.length ? bbAmounts[bbAmounts.length - 1] : 0;
+  if (lastBet > 0 && unnamedCalls > 0) pot += lastBet * unnamedCalls;
+  return pot;
+}
+
+/**
+ * 检测两种重复牌：
+ *   1. 手牌 4字母形式 vs 公共牌（同一张牌不能既在手里又在牌面）
+ *   2. 公共牌内部自身重复
+ * 若发现则把告警写到 out.warning（已有告警会追加一行）
+ */
+function _checkBattleDuplicateCards(s, out) {
+  const hand4 = (s.hand || '').match(RX_HAND_4);
   if (hand4 && s.board) {
     const handCards = new Set([
       (hand4[1].toUpperCase() + hand4[2].toLowerCase()).toUpperCase(),
@@ -6453,10 +7195,13 @@ function validateBattleScenario(s) {
       out.warning = out.warning ? out.warning + '\n' + msg : msg;
     }
   }
-
-  return out;
 }
 
+/**
+ * 把 AI 出的对战场景渲染到 #battleStage：2D 牌桌 + 场景卡片 + 行动按钮
+ * 包括校验警告、底池修正显示、重新出题按钮等
+ * @param {object} s scenario 对象
+ */
 function renderBattleScenario(s) {
   const stage = document.getElementById('battleStage');
   const handChips = renderHandChips(s.hand);
@@ -6521,6 +7266,14 @@ function renderBattleScenario(s) {
 }
 
 // 根据街/需跟注额生成动作按钮
+/**
+ * 根据当前街（preflop/翻后）和 toCallBB 生成对应的可点击动作按钮 HTML
+ * 翻前：fold / call / 3-bet / 4-bet / all-in
+ * 翻后：fold / check-or-call / bet / raise / all-in
+ * @param {'preflop'|'flop'|'turn'|'river'} street
+ * @param {number} toCallBB 需跟注额（BB）
+ * @returns {string} HTML 字符串
+ */
 function abBattleActionButtons(street, toCallBB) {
   const canCheck = !toCallBB || toCallBB <= 0;
   if (street === 'preflop') {
@@ -6544,6 +7297,12 @@ function abBattleActionButtons(street, toCallBB) {
   `;
 }
 
+/**
+ * 处理对战场景里用户点击动作按钮的事件：
+ * - 校验对战状态、计分、显示正确/错误反馈 + 解释
+ * - 禁用按钮避免重复提交
+ * @param {string} action 用户选择的动作，如 'fold'、'call'、'3-bet'
+ */
 function submitBattleAction(action) {
   if (!battle.scenario || battle.answered) return;
   battle.answered = true;
@@ -6588,6 +7347,9 @@ function submitBattleAction(action) {
   updateBattleScore();
 }
 
+/**
+ * 显示 GTO 正确答案提示（不计入分数）—— 用户主动点击"看答案"按钮触发
+ */
 function showBattleHint() {
   if (!battle.scenario || battle.answered) return;
   const s = battle.scenario;
@@ -6601,6 +7363,9 @@ function showBattleHint() {
   </div>`;
 }
 
+/**
+ * 把当前 battle.correct / battle.total / 命中率写入顶部统计区
+ */
 function updateBattleScore() {
   document.getElementById('battleCorrect').textContent = battle.correct;
   document.getElementById('battleTotal').textContent = battle.total;
@@ -6608,6 +7373,9 @@ function updateBattleScore() {
   document.getElementById('battleRate').textContent = battle.total ? (rate + '%') : '-';
 }
 
+/**
+ * 重置对战分数与场景，回到初始 pending 状态
+ */
 function resetBattleScore() {
   battle.correct = 0;
   battle.total = 0;
@@ -6639,9 +7407,19 @@ const AB_POSITIONS_9MAX = ['utg','utg1','mp','mp1','lj','hj','co','btn','sb','bb
 const AB_RANK_ORDER = '23456789TJQKA';
 const AB_SUITS = ['s','h','d','c'];
 
+/**
+ * 根据 gameType 返回对应的位置顺序数组（6-max 或 9-max）
+ * @param {string} gameType
+ * @returns {string[]}
+ */
 function abPositionsFor(gameType) {
   return gameType.startsWith('9max') ? AB_POSITIONS_9MAX : AB_POSITIONS_6MAX;
 }
+/**
+ * 从 gameType 字符串里解析出 BB 深度（如 '6max-100bb' → 100），无 BB 信息返回 100
+ * @param {string} gameType
+ * @returns {number}
+ */
 function abStackBBFor(gameType) {
   const m = gameType.match(/(\d+)bb/);
   return m ? parseInt(m[1]) : 100;
@@ -6663,12 +7441,22 @@ const autoBattle = {
   stats: { hands: 0, wins: 0, net: 0 },
 };
 
+/**
+ * 生成一副标准 52 张牌的字符串数组（'Ah'..'2c'）
+ * @returns {string[]} 长度 52
+ */
 function abBuildDeck() {
   const deck = [];
   for (const r of AB_RANK_ORDER) for (const s of AB_SUITS) deck.push(r + s);
   return deck;
 }
 
+/**
+ * Fisher-Yates 原地洗牌
+ * @template T
+ * @param {T[]} arr
+ * @returns {T[]} 同一引用（已打乱）
+ */
 function abShuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -6677,11 +7465,20 @@ function abShuffle(arr) {
   return arr;
 }
 
+/**
+ * 把牌字符串 'Ah' 转成带 unicode 花色符号的展示形式 'A♥'
+ * @param {string} c 牌字符串
+ * @returns {string}
+ */
 function abCardLabel(c) {
   const r = c[0], s = c[1];
   return r + getSuitSymbol(s);
 }
 
+/**
+ * 重置 autoBattle 单手状态：清空 seats / board / pot / actionHistory，回到翻牌前
+ * 不清空累积的 stats
+ */
 function abReset() {
   autoBattle.seats = [];
   autoBattle.board = [];
@@ -6694,6 +7491,10 @@ function abReset() {
   autoBattle.handOver = false;
 }
 
+/**
+ * 从面板读取用户位置：'random' 时随机抽一个，否则用面板值
+ * @returns {string} 位置 key
+ */
 function abPickUserPos() {
   const sel = document.getElementById('abUserPos').value;
   if (sel === 'random') {
@@ -6704,6 +7505,9 @@ function abPickUserPos() {
   return sel;
 }
 
+/**
+ * 起一手自动对战：重置状态 → 创建 seats → 发牌 → 下盲注 → 写日志 → 进入事件循环
+ */
 function abStartHand() {
   abReset();
   autoBattle.gameType = document.getElementById('abGameType').value;
@@ -6756,6 +7560,10 @@ function abStartHand() {
   abRunNext();
 }
 
+/**
+ * 往 #abLog 追加一行 HTML 记录并滚到底
+ * @param {string} html
+ */
 function abLog(html) {
   const el = document.getElementById('abLog');
   const line = document.createElement('div');
@@ -6765,6 +7573,11 @@ function abLog(html) {
   el.scrollTop = el.scrollHeight;
 }
 
+/**
+ * 把若干张牌 ['Ah','Kd',...] 渲染成带颜色 chip 的 HTML 片段
+ * @param {string[]} cards
+ * @returns {string}
+ */
 function abCardChipsHtml(cards) {
   if (!cards || !cards.length) return '';
   return cards.map(c => {
@@ -6774,6 +7587,11 @@ function abCardChipsHtml(cards) {
 }
 
 // Convert ['Ah','Kd'] → 'AKo' / 'AKs' / 'AA' notation expected by renderHandChips
+/**
+ * 把 ['Ah','Kd'] 这种真实牌转成 renderHandChips 用的 'AKo' / 'AKs' / 'AA' 标准记号
+ * @param {string[]} cards 长度 2
+ * @returns {string} 手牌 key
+ */
 function abHoleCardsNotation(cards) {
   if (!cards || cards.length !== 2) return '';
   const c1 = cards[0], c2 = cards[1];
@@ -6788,11 +7606,19 @@ function abHoleCardsNotation(cards) {
   return big + small + suf;
 }
 
+/**
+ * 把 autoBattle.board 渲染成公共牌 chip HTML；空 board 时返回灰色占位文字
+ * @returns {string}
+ */
 function abBoardChips() {
   if (!autoBattle.board.length) return '<span style="color:#636e72;font-size:10px;">（无）</span>';
   return abCardChipsHtml(autoBattle.board);
 }
 
+/**
+ * 把当前 autoBattle 状态渲染到 #battleStage：
+ * 复用 renderBattleTable 渲染 2D 牌桌 + 当前场景卡片（含底池/跟注）
+ */
 function abRenderScenarioInStage() {
   // Reuse the existing 2D table renderer with a synthetic scenario
   const userCards = autoBattle.seats.find(x => x.isUser)?.holeCards || [];
@@ -6833,6 +7659,10 @@ function abRenderScenarioInStage() {
   `;
 }
 
+/**
+ * 把 autoBattle.actionHistory 格式化成 "你 加注 2.5BB, BTN 弃牌" 这样的自由文本
+ * @returns {string}
+ */
 function abFormatActionHistory() {
   if (!autoBattle.actionHistory.length) return '(无人行动)';
   return autoBattle.actionHistory.map(a => {
@@ -6842,6 +7672,11 @@ function abFormatActionHistory() {
   }).join('，');
 }
 
+/**
+ * 把单个动作对象翻译成中文展示文本（"弃牌"、"跟注 2.5BB"、"加注到 7.0BB" 等）
+ * @param {{action:string, amount:number}} a 动作对象
+ * @returns {string}
+ */
 function abActionText(a) {
   if (a.action === 'fold') return '弃牌';
   if (a.action === 'check') return '看牌';
@@ -6852,10 +7687,20 @@ function abActionText(a) {
   return a.action;
 }
 
+/**
+ * 返回当前未弃牌的座位数组（用于判定街是否结束、谁是赢家等）
+ * @returns {Array<object>}
+ */
 function abActivePlayers() {
   return autoBattle.seats.filter(s => !s.folded);
 }
 
+/**
+ * 全量刷新自动对战的 UI：
+ * - 2D 牌桌 + 场景卡
+ * - 累计统计
+ * - 动作按钮（轮到用户时显示尺码按钮；轮到 AI 时显示"思考中"）
+ */
 function abUpdateUI() {
   // Top: 2D table + scenario card
   abRenderScenarioInStage();
@@ -6939,6 +7784,13 @@ function abUpdateUI() {
   }
 }
 
+/**
+ * 自动对战的主事件循环：
+ * - 检查一手是否结束（只剩 1 人 / 用户已弃 / 全 all-in runout）
+ * - 检查街是否结束，必要时推进到下一街
+ * - 轮到用户时停住等点击；轮到 AI 时调 abAskAI 拿决策并应用
+ * 失败时让该 AI 默认弃牌
+ */
 async function abRunNext() {
   if (!autoBattle.active || autoBattle.handOver) return;
   // 用户已弃牌：直接结束（避免 AI 们继续对抗浪费时间）
@@ -6990,6 +7842,11 @@ async function abRunNext() {
   }
 }
 
+/**
+ * 判断当前街是否已经收官：
+ * 所有活跃玩家都已行动，且贡献额与 highBet 匹配（或已 all-in）
+ * @returns {boolean}
+ */
 function abStreetClosed() {
   const active = abActivePlayers();
   if (active.length < 2) return false;
@@ -6999,6 +7856,10 @@ function abStreetClosed() {
   return allActed && allMatched;
 }
 
+/**
+ * 进入下一街：翻前→翻牌→转牌→河牌→摊牌
+ * 发新公共牌、重置 hasActed/highBet/minRaise、设置首位行动者（SB 后的第一位活跃玩家）
+ */
 function abAdvanceStreet() {
   // Reset per-street flags
   for (const s of autoBattle.seats) {
@@ -7047,6 +7908,10 @@ function abAdvanceStreet() {
 }
 
 // Deal next street silently (used for all-in runout, no actor interaction)
+/**
+ * 静默推进到下一街（用于全 all-in 后无需玩家交互的"跑完剩余牌"流程）
+ * 不重置行动者，因为不再需要任何人行动
+ */
 function abAdvanceStreetNoActor() {
   if (autoBattle.street === 'preflop') {
     autoBattle.deck.pop();
@@ -7074,6 +7939,12 @@ function abAdvanceStreetNoActor() {
   }
 }
 
+/**
+ * 把动作应用到座位：扣筹码、加 pot、更新 contributed/hasActed/allIn/highBet/minRaise，
+ * 然后调用 abAdvanceActor 推进到下一位
+ * @param {object} seat 座位对象
+ * @param {{action:string, amount:number}} action 动作
+ */
 function abApplyAction(seat, action) {
   const amt = action.amount || 0;
   if (action.action === 'fold') {
@@ -7110,6 +7981,10 @@ function abApplyAction(seat, action) {
   abAdvanceActor();
 }
 
+/**
+ * 把 actorIdx 推进到下一位未弃牌且未全下的座位（顺时针）
+ * @returns {boolean} 找到下一位返回 true；只剩 all-in / 无人可行动返回 false
+ */
 function abAdvanceActor() {
   if (autoBattle.handOver) return;
   const positions = abPositionsFor(autoBattle.gameType);
@@ -7126,6 +8001,11 @@ function abAdvanceActor() {
   return false; // no more actors — all remaining are all-in
 }
 
+/**
+ * 把一次行动写到 #abLog（含玩家名 + 中文动作 + 颜色 class）
+ * @param {object} seat 座位对象
+ * @param {{action:string, amount:number}} action
+ */
 function abLogAction(seat, action) {
   const who = seat.isUser ? '你' : seat.pos.toUpperCase();
   let cls = action.action;
@@ -7138,12 +8018,113 @@ function abLogAction(seat, action) {
   abLog(`<span class="${prefix}${cls}">${who}: ${txt}</span>`);
 }
 
+/* ============================================================================
+   Preflop Hand Strength (HS) lookup — 参考 Equilab 的 6-max / 9-max 数值
+   ----------------------------------------------------------------------------
+   HS 值定义：手牌 vs 随机一手牌时的胜率（0-1），未考虑位置和筹码深度。
+   用作自动对战的启发式兜底：
+     - 当 LLM 不可用（无 API Key）或连续两次解析失败时，回退到 HS 启发式
+     - 翻牌后暂不实现 HS-based 决策（需结合牌面听牌/成牌强度），直接 fold
+   ============================================================================ */
+const PREFLOP_HS = {
+  // 对子（按牌面 A→2）
+  'AA': 0.852, 'KK': 0.824, 'QQ': 0.798, 'JJ': 0.775, 'TT': 0.752, '99': 0.722, '88': 0.694, '77': 0.667, '66': 0.640, '55': 0.605, '44': 0.572, '33': 0.535, '22': 0.498,
+  // 同花（高牌 → 低牌）
+  'AKs': 0.673, 'AQs': 0.659, 'AJs': 0.648, 'ATs': 0.638, 'A9s': 0.617, 'A8s': 0.610, 'A7s': 0.603, 'A6s': 0.598, 'A5s': 0.598, 'A4s': 0.591, 'A3s': 0.586, 'A2s': 0.580,
+  'KQs': 0.633, 'KJs': 0.621, 'KTs': 0.610, 'K9s': 0.587, 'K8s': 0.575, 'K7s': 0.564, 'K6s': 0.557, 'K5s': 0.553, 'K4s': 0.547, 'K3s': 0.541, 'K2s': 0.535,
+  'QJs': 0.606, 'QTs': 0.594, 'Q9s': 0.571, 'Q8s': 0.555, 'Q7s': 0.546, 'Q6s': 0.539, 'Q5s': 0.535, 'Q4s': 0.528, 'Q3s': 0.521, 'Q2s': 0.514,
+  'JTs': 0.581, 'J9s': 0.557, 'J8s': 0.539, 'J7s': 0.527, 'J6s': 0.519, 'J5s': 0.514, 'J4s': 0.506, 'J3s': 0.499, 'J2s': 0.493,
+  'T9s': 0.551, 'T8s': 0.533, 'T7s': 0.518, 'T6s': 0.508, 'T5s': 0.502, 'T4s': 0.495, 'T3s': 0.488, 'T2s': 0.481,
+  '98s': 0.530, '97s': 0.511, '96s': 0.497, '95s': 0.489, '94s': 0.481, '93s': 0.475, '92s': 0.468,
+  '87s': 0.515, '86s': 0.494, '85s': 0.481, '84s': 0.473, '83s': 0.466, '82s': 0.460,
+  '76s': 0.502, '75s': 0.483, '74s': 0.469, '73s': 0.461, '72s': 0.455,
+  '65s': 0.493, '64s': 0.476, '63s': 0.461, '62s': 0.453,
+  '54s': 0.485, '53s': 0.464, '52s': 0.452,
+  '43s': 0.457, '42s': 0.446,
+  '32s': 0.448,
+  // 异花（高牌 → 低牌）
+  'AKo': 0.654, 'AQo': 0.635, 'AJo': 0.620, 'ATo': 0.605, 'A9o': 0.580, 'A8o': 0.572, 'A7o': 0.563, 'A6o': 0.556, 'A5o': 0.555, 'A4o': 0.547, 'A3o': 0.541, 'A2o': 0.534,
+  'KQo': 0.602, 'KJo': 0.586, 'KTo': 0.571, 'K9o': 0.546, 'K8o': 0.532, 'K7o': 0.519, 'K6o': 0.512, 'K5o': 0.508, 'K4o': 0.501, 'K3o': 0.494, 'K2o': 0.488,
+  'QJo': 0.567, 'QTo': 0.550, 'Q9o': 0.526, 'Q8o': 0.508, 'Q7o': 0.498, 'Q6o': 0.491, 'Q5o': 0.486, 'Q4o': 0.479, 'Q3o': 0.472, 'Q2o': 0.465,
+  'JTo': 0.534, 'J9o': 0.508, 'J8o': 0.490, 'J7o': 0.478, 'J6o': 0.470, 'J5o': 0.464, 'J4o': 0.456, 'J3o': 0.450, 'J2o': 0.443,
+  'T9o': 0.500, 'T8o': 0.480, 'T7o': 0.464, 'T6o': 0.454, 'T5o': 0.448, 'T4o': 0.440, 'T3o': 0.434, 'T2o': 0.428,
+  '98o': 0.476, '97o': 0.458, '96o': 0.443, '95o': 0.435, '94o': 0.428, '93o': 0.422, '92o': 0.416,
+  '87o': 0.457, '86o': 0.434, '85o': 0.422, '84o': 0.414, '83o': 0.408, '82o': 0.402,
+  '76o': 0.439, '75o': 0.420, '74o': 0.405, '73o': 0.398, '72o': 0.392,
+  '65o': 0.423, '64o': 0.402, '63o': 0.389, '62o': 0.382,
+  '54o': 0.408, '53o': 0.388, '52o': 0.378,
+  '43o': 0.376, '42o': 0.368,
+  '32o': 0.359,
+};
+
+/**
+ * 把两张底牌 ["Ah","Kh"] 转成 PREFLOP_HS 表里的标准 key：
+ *   "AA"（对子）/ "AKs"（同花）/ "AKo"（异花），大牌在前。
+ * @param {string[]} holeCards
+ * @returns {string|null} 标准手牌 key，无效输入返回 null
+ */
+function abHoleCardsToKey(holeCards) {
+  if (!Array.isArray(holeCards) || holeCards.length < 2) return null;
+  const c1 = holeCards[0], c2 = holeCards[1];
+  if (!c1 || !c2) return null;
+  const r1 = c1[0], s1 = c1[1];
+  const r2 = c2[0], s2 = c2[1];
+  if (r1 === r2) return r1 + r2;
+  const i1 = RANKS.indexOf(r1);
+  const i2 = RANKS.indexOf(r2);
+  if (i1 === -1 || i2 === -1) return null;
+  const [bigR, smallR] = i1 < i2 ? [r1, r2] : [r2, r1];
+  const suf = s1 === s2 ? 's' : 'o';
+  return bigR + smallR + suf;
+}
+
+/**
+ * 用 HS 阈值做翻牌前决策（无 LLM 时的兜底启发式）：
+ *   - callAmt <= 0（可看牌/下注）：HS≥0.55 raise，HS≥0.40 check，否则 fold
+ *   - callAmt > 0 （需跟注）：   HS≥0.65 raise，HS≥0.45 call，否则 fold
+ *   - 翻牌后暂不实现，回退到 fold
+ * @param {object} seat AI 座位
+ * @param {number} callAmt 当前需跟注额
+ * @param {number} minRaise 最低加注到
+ * @returns {{action:string, amount:number}}
+ */
+function _abPreflopHeuristicDecision(seat, callAmt, minRaise) {
+  // 翻牌后：HS 表只覆盖翻牌前场景，未实现 postflop 启发式 → 保守弃牌
+  if (autoBattle.board.length > 0) return { action: 'fold', amount: 0 };
+
+  const key = abHoleCardsToKey(seat.holeCards);
+  const hs = key ? PREFLOP_HS[key] : null;
+  if (hs === null || hs === undefined) return { action: 'fold', amount: 0 };
+
+  if (callAmt <= 0) {
+    if (hs >= 0.55) return { action: 'raise', amount: minRaise };
+    if (hs >= 0.40) return { action: 'check', amount: 0 };
+    return { action: 'fold', amount: 0 };
+  }
+  if (hs >= 0.65) return { action: 'raise', amount: minRaise };
+  if (hs >= 0.45) return { action: 'call',  amount: callAmt };
+  return { action: 'fold', amount: 0 };
+}
+
+/**
+ * 自动对战里向 LLM 询问某 AI 座位当前决策：
+ * 把牌局信息（位置/底牌/公共牌/底池/行动史）拼成 prompt 发送，期望返回 JSON
+ * 会尝试两次（详细 prompt → 简化 prompt），失败则回退到 HS 启发式
+ * @param {object} seat AI 座位（含 holeCards/stack/contributed）
+ * @returns {Promise<{action:string, amount:number}>} 规范化后的决策
+ */
 async function abAskAI(seat) {
   const apiKey = (localStorage.getItem('poker_ai_apikey') || document.getElementById('apiKeyInput').value || DEFAULT_MINIMAX_KEY).trim();
+  const callAmt = autoBattle.highBet - seat.contributed;
+  const minRaise = Math.max(autoBattle.highBet + autoBattle.minRaise, autoBattle.highBet * 2);
+
+  // 没填 Key 时不再抛错阻塞流程，而是提示用户并回退到 HS 启发式
   if (!apiKey) {
-    promptForApiKey();
-    throw new Error('未设置 API Key，请在弹窗中输入');
+    if (typeof promptForApiKey === 'function') promptForApiKey();
+    console.warn('[abAskAI] 未设置 API Key，回退到 HS 启发式决策');
+    return _abPreflopHeuristicDecision(seat, callAmt, minRaise);
   }
+
   const model = (document.getElementById('apiModelInput').value || DEFAULT_MINIMAX_MODEL).trim();
   const baseUrl = (document.getElementById('apiBaseInput')?.value || DEFAULT_MINIMAX_BASE).trim();
   const systemPrompt = getEffectiveSystemPrompt();
@@ -7153,11 +8134,9 @@ async function abAskAI(seat) {
   const historyTxt = autoBattle.actionHistory.length ? autoBattle.actionHistory.map(a => {
     return `${a.pos.toUpperCase()} ${abActionText(a)}`;
   }).join('；') : '(无人行动)';
-  const callAmt = autoBattle.highBet - seat.contributed;
   const validActions = callAmt <= 0
     ? 'check / bet / raise / allin'
     : `fold / call ${callAmt.toFixed(1)}BB / raise / allin (你还有 ${seat.stack.toFixed(1)}BB 筹码)`;
-  const minRaise = Math.max(autoBattle.highBet + autoBattle.minRaise, autoBattle.highBet * 2);
 
   const basePrompt = `你是德州扑克 GTO AI，正在自动对战中。你扮演 ${seat.pos.toUpperCase()} 位置。
 
@@ -7234,10 +8213,18 @@ ${validActions}
       err = e;
     }
   }
-  throw new Error('AI 未返回 JSON: ' + (raw ? raw.substring(0, 100) : '(空响应)'));
+  // LLM 两次都失败：回退到 HS 启发式决策，避免卡住对战流程
+  console.warn('[abAskAI] LLM 解析失败，回退到 HS 启发式: ' + (err ? err.message : 'unknown'), raw ? raw.substring(0, 100) : '(空响应)');
+  return _abPreflopHeuristicDecision(seat, callAmt, minRaise);
 }
 
 // Parse the LLM response, accepting JSON or fallback plain-text
+/**
+ * 解析 AI 返回的决策：
+ * 优先尝试 JSON 对象解析；失败则按正则匹配中英文动作关键字 + 数字
+ * @param {string} raw AI 输出文本
+ * @returns {{action:string, amount:number}|null}
+ */
 function abParseAIDecision(raw) {
   if (!raw) return null;
   let s = raw.trim();
@@ -7268,6 +8255,17 @@ function abParseAIDecision(raw) {
 }
 
 // Normalize action to valid game action with proper amount
+/**
+ * 把 AI 返回的决策规范化：
+ * - 修正 3bet/4bet → raise、all-in → allin
+ * - call 时 amount = min(callAmt, seat.stack)
+ * - raise/bet 时保证金额合法且不超过 all-in 上限
+ * @param {{action:string, amount:number}} obj AI 决策
+ * @param {object} seat 当前座位
+ * @param {number} callAmt 需跟注额
+ * @param {number} minRaise 最小合法加注总额
+ * @returns {{action:string, amount:number}} 规范化后的动作
+ */
 function abNormalizeAction(obj, seat, callAmt, minRaise) {
   let action = String(obj.action || 'fold').toLowerCase().replace(/[\s-]+/g, '');
   if (action === 'all') action = 'allin';
@@ -7293,6 +8291,11 @@ function abNormalizeAction(obj, seat, callAmt, minRaise) {
   return { action: 'fold', amount: 0 };
 }
 
+/**
+ * 用户点击动作按钮的入口：把金额（raise/bet 时为按钮的 BB 数）处理后调用 abApplyAction
+ * @param {string} action 'fold'/'check'/'call'/'bet'/'raise'/'allin'
+ * @param {number|string} [amount] raise/bet 时按钮带的目标总注额（BB）
+ */
 function abUserAct(action, amount) {
   const seat = autoBattle.seats.find(s => s.isUser);
   if (!seat) return;
@@ -7314,8 +8317,26 @@ function abUserAct(action, amount) {
    - 已通过单元测试：皇家 / 同花顺 / 四条 / 葫芦 / 顺子 / 轮 A2345 / 两对 / 一对 / 高牌
    NOTE: 若增加新的牌型（如 5+1 同花顺），务必保证 cat 序号递增，否则会影响排序。
    ------------------------------------------------------------------ */
+/**
+ * 取得一张牌字符串里的牌面值在 AB_RANK_ORDER 里的索引（2=0 ... A=12）
+ * @param {string} c
+ * @returns {number}
+ */
 function abRankIndex(c) { return AB_RANK_ORDER.indexOf(c[0]); }
+/**
+ * 取得一张牌字符串里的花色短名
+ * @param {string} c
+ * @returns {string}
+ */
 function abSuit(c) { return c[1]; }
+/**
+ * 5 张牌的牌型评估器：返回 {cat, score, desc}
+ * - cat 0..9：皇家 / 同花顺 / 四条 / 葫芦 / 同花 / 顺子 / 三条 / 两对 / 一对 / 高牌
+ * - score = cat*1e10 + tiebreaker 数值，便于直接比较
+ * 已通过单元测试覆盖各类牌型
+ * @param {string[]} cards 长度 5 的牌字符串数组
+ * @returns {{cat:number, score:number, desc:string}}
+ */
 function abEval5(cards) {
   // cards: array of 5 strings like 'Ah'. Returns {rank: number, kickers: [r,r,r,r,r], desc: string}
   const ranks = cards.map(abRankIndex).sort((a,b) => b-a);
@@ -7355,6 +8376,12 @@ function abEval5(cards) {
   const labels = ['高牌','一对','两对','三条','顺子','同花','葫芦','四条','同花顺','皇家同花顺'];
   return { cat, score, desc: `${labels[cat]} (${ranks.map(r => AB_RANK_ORDER[r]).join('')})` };
 }
+/**
+ * 从 2 张手牌 + 最多 5 张公共牌（共 7 张）里枚举所有 5 张子集，返回牌型最高的一手
+ * @param {string[]} hole 手牌 2 张
+ * @param {string[]} board 公共牌 0-5 张
+ * @returns {{cat:number, score:number, desc:string}|null}
+ */
 function abBestHandFrom7(hole, board) {
   const all = hole.concat(board);
   let best = null;
@@ -7371,6 +8398,10 @@ function abBestHandFrom7(hole, board) {
   return best;
 }
 
+/**
+ * 摊牌：对所有未弃牌的玩家算 7 选 5 最佳手牌，按 score 降序取最高分座位作为赢家
+ * 然后调用 abEndHand 收尾
+ */
 function abShowdown() {
   const active = abActivePlayers();
   const results = active.map(s => ({
@@ -7384,12 +8415,72 @@ function abShowdown() {
   abEndHand(winners.map(r => r.seat.pos), 'showdown');
 }
 
+/**
+ * 计算一手牌的边池分配方案：
+ *   1. 把所有不重复的贡献额（contributed）从小到大排序
+ *   2. 每个层 L：把 "从上一层到 L" 这部分乘以"贡献 ≥ L 的人数"作为新一层底池
+ *   3. 该层底池的合格赢家 = "贡献 ≥ L 且未弃牌"的位置
+ *
+ * 例：A=100、B=200、C=300 三人都到摊牌 → 3 池：300 (A+B+C) / 200 (B+C) / 100 (C)
+ * 例：A=100 弃牌，B=100、C=300 到摊牌 → 2 池：200 (B+C，A 已弃不计入) / 200 (C)
+ *
+ * @param {Array} seats 座位数组，每项含 {pos, contributed, folded}
+ * @returns {Array<{amount:number, eligible:string[]}>}
+ */
+function _calcBattleSidePots(seats) {
+  const sortedContribs = [...new Set(seats.map(s => s.contributed))].sort((a, b) => a - b);
+  const pots = [];
+  let prev = 0;
+  for (const lvl of sortedContribs) {
+    if (lvl <= prev) continue;
+    const tierDelta = lvl - prev;
+    const contributorsCount = seats.filter(s => s.contributed >= lvl).length;
+    const eligible = seats.filter(s => s.contributed >= lvl && !s.folded).map(s => s.pos);
+    if (tierDelta > 0 && contributorsCount > 0 && eligible.length > 0) {
+      pots.push({ amount: tierDelta * contributorsCount, eligible });
+    }
+    prev = lvl;
+  }
+  return pots;
+}
+
+/**
+ * 计算用户在该手牌的最终获得（只在用户是赢家时有意义）：
+ *   把每层边池在用户合格 + 是赢家时累加 (pot / 该层赢家数)
+ *
+ * @param {Array} seats 座位数组
+ * @param {string[]} winnerPositions 摊牌赢家位置 key 列表
+ * @param {string} userPos 用户位置 key
+ * @returns {number} 用户本手赢得的 BB 数（0 表示不是赢家或不合格）
+ */
+function _calcBattleUserPayout(seats, winnerPositions, userPos) {
+  const winnerSet = new Set(winnerPositions);
+  const pots = _calcBattleSidePots(seats);
+  let payout = 0;
+  for (const pot of pots) {
+    if (!pot.eligible.includes(userPos)) continue;
+    const eligibleWinners = pot.eligible.filter(p => winnerSet.has(p));
+    if (eligibleWinners.length === 0) continue;
+    payout += pot.amount / eligibleWinners.length;
+  }
+  return payout;
+}
+
+/**
+ * 一手结束：更新 stats、累计 net、写日志、显示结果卡、重新启用开始/再来按钮
+ * @param {string[]} winnerPositions 赢家位置 key 列表（多人平分底池）
+ * @param {string} reason 结束原因，如 'showdown'、'user_folded'、'其他人都弃牌'
+ */
 function abEndHand(winnerPositions, reason) {
   autoBattle.handOver = true;
   autoBattle.active = false;
   const userSeat = autoBattle.seats.find(s => s.isUser);
   const userWon = winnerPositions.includes(userSeat.pos);
-  const wonAmount = autoBattle.pot / (winnerPositions.length || 1);
+  // 真正的边池分配：每人按 contributed 累计到自己的边池里，再按赢家摊牌排名分摊。
+  // 原实现是 "底池 / 赢家数" 平均分，忽略了有人 all-in 后只投了一部分的情况。
+  const wonAmount = userWon
+    ? _calcBattleUserPayout(autoBattle.seats, winnerPositions, userSeat.pos)
+    : 0;
   const net = userWon ? (wonAmount - userSeat.contributed) : -userSeat.contributed;
   if (userWon) autoBattle.stats.wins++;
   autoBattle.stats.hands++;
@@ -7453,6 +8544,9 @@ function abEndHand(winnerPositions, reason) {
   document.getElementById('abStartBtn').disabled = false;
 }
 
+/**
+ * 启动自动对战 UI 状态：禁用开始按钮、启用停止按钮、清空日志、起一手
+ */
 function abStartAutoBattle() {
   document.getElementById('abStartBtn').disabled = true;
   document.getElementById('abAgainBtn').disabled = true;
@@ -7461,6 +8555,9 @@ function abStartAutoBattle() {
   abStartHand();
 }
 
+/**
+ * 停止自动对战：把 active/handOver 置位让事件循环退出；恢复按钮可用
+ */
 function abStopAutoBattle() {
   autoBattle.active = false;
   autoBattle.handOver = true;
@@ -7470,6 +8567,9 @@ function abStopAutoBattle() {
   document.getElementById('abStopBtn').disabled = true;
 }
 
+/**
+ * 完整重置自动对战：停止当前手、清零 stats、清空日志/结果卡
+ */
 function abResetAutoBattle() {
   abStopAutoBattle();
   autoBattle.stats = { hands: 0, wins: 0, net: 0 };
@@ -7480,13 +8580,22 @@ function abResetAutoBattle() {
   document.getElementById('abAgainBtn').disabled = true;
 }
 
+/**
+ * 显示/隐藏自动对战面板（#autoBattleWrap）
+ * @param {boolean} show true 显示，false 隐藏
+ */
 function abToggleAutoBattleUI(show) {
   document.getElementById('autoBattleWrap').style.display = show ? 'block' : 'none';
 }
 
+/**
+ * 把字符串安全转义成 HTML：处理 &<>"' 五个字符，避免 XSS / DOM 注入
+ * @param {*} s 任意值（null/undefined 视为空串）
+ * @returns {string}
+ */
 function escapeHtml(s) {
   if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({
+  return String(s).replace(RX_HTML_ESCAPE, c => ({
     '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
   }[c]));
 }
