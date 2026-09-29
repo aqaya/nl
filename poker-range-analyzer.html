@@ -264,6 +264,13 @@
   .breakdown .col-pair { background: #fff5d6; }
   .breakdown .col-suited { background: #d6ecff; }
   .breakdown .col-off { background: #ffe0e0; }
+  /* 总组合数列（理论最大，固定值，视觉上更弱） */
+  .breakdown td.total-count-cell {
+    background: rgba(255, 255, 255, 0.55);
+    color: #636e72;
+    font-weight: 600;
+    cursor: default;
+  }
   .breakdown td {
     cursor: pointer;
     transition: filter 0.1s;
@@ -1911,15 +1918,18 @@
     <table>
       <thead>
         <tr>
-          <th class="col-pair" style="width:18%">手对子</th>
-          <th class="col-pair" style="width:10%">组合数</th>
-          <th class="col-pair" style="width:8%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
-          <th class="col-suited" style="width:18%">同花</th>
-          <th class="col-suited" style="width:10%">组合数</th>
-          <th class="col-suited" style="width:8%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
-          <th class="col-off" style="width:18%">非同花</th>
-          <th class="col-off" style="width:10%">组合数</th>
-          <th class="col-off" style="width:8%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
+          <th class="col-pair" style="width:15%">手对子</th>
+          <th class="col-pair" style="width:8%">组合数</th>
+          <th class="col-pair" style="width:7%" title="该手牌的理论最大组合数（对子=6，不考虑百分比/覆盖/阻塞）。">总组合数</th>
+          <th class="col-pair" style="width:7%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
+          <th class="col-suited" style="width:15%">同花</th>
+          <th class="col-suited" style="width:8%">组合数</th>
+          <th class="col-suited" style="width:7%" title="该手牌的理论最大组合数（同花=4，不考虑百分比/覆盖/阻塞）。">总组合数</th>
+          <th class="col-suited" style="width:7%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
+          <th class="col-off" style="width:15%">非同花</th>
+          <th class="col-off" style="width:8%">组合数</th>
+          <th class="col-off" style="width:7%" title="该手牌的理论最大组合数（非同花=12，不考虑百分比/覆盖/阻塞）。">总组合数</th>
+          <th class="col-off" style="width:7%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
         </tr>
       </thead>
       <tbody id="breakdownBody"></tbody>
@@ -3358,7 +3368,7 @@ function buildBreakdown() {
 /**
  * 把 buildBreakdown 的结果渲染成 breakdown 表的 DOM（tbody + 合计行）
  * - compact 模式下隐藏三列都是 fold 的行
- * - 每行 9 个 td：手牌 / 组合数 / 使用勾选 × 三类
+ * - 每行 12 个 td：手牌 / 组合数 / 总组合数 / 使用勾选 × 三类
  * - 最后追加一行按类汇总的合计行
  */
 function renderBreakdown() {
@@ -3379,12 +3389,15 @@ function renderBreakdown() {
     const tr = document.createElement('tr');
     tr.appendChild(makeHandTd(p));
     tr.appendChild(makeCountTd(p));
+    tr.appendChild(makeTotalCountTd(p));
     tr.appendChild(makeUseTd(p));
     tr.appendChild(makeHandTd(s));
     tr.appendChild(makeCountTd(s));
+    tr.appendChild(makeTotalCountTd(s));
     tr.appendChild(makeUseTd(s));
     tr.appendChild(makeHandTd(o));
     tr.appendChild(makeCountTd(o));
+    tr.appendChild(makeTotalCountTd(o));
     tr.appendChild(makeUseTd(o));
     tbody.appendChild(tr);
   }
@@ -3395,12 +3408,15 @@ function renderBreakdown() {
   trow.innerHTML = `
     <td>${bd.pairs.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.pairs))}</td>
+    <td>${bd.pairs.reduce((s, x) => s + (x.count || 0), 0)}</td>
     <td></td>
     <td>${bd.suiteds.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.suiteds))}</td>
+    <td>${bd.suiteds.reduce((s, x) => s + (x.count || 0), 0)}</td>
     <td></td>
     <td>${bd.offs.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.offs))}</td>
+    <td>${bd.offs.reduce((s, x) => s + (x.count || 0), 0)}</td>
     <td></td>
   `;
   tbody.appendChild(trow);
@@ -3447,6 +3463,22 @@ function sumEffectiveChecked(arr) {
 function isUsed(key) {
   // Default: not in tableUsed = not used (user must opt-in via checkbox)
   return state.tableUsed && state.tableUsed[key] === true;
+}
+
+/**
+ * 为 breakdown 表里某行生成"总组合数" td（理论最大，对子=6 / 同花=4 / 异花=12）
+ * - 与"组合数"列的差异：本列不应用百分比、覆盖、阻塞扣除
+ * - 用于让用户一眼对比"理论最大" vs "实际计入"
+ * @param {{key:string, action:string, count:number}|null} item 单个手牌项；null 时返回空 td
+ * @returns {HTMLTableCellElement} td 节点
+ */
+function makeTotalCountTd(item) {
+  const td = document.createElement('td');
+  td.classList.add('total-count-cell');
+  if (!item) return td;
+  td.dataset.hand = item.key;
+  td.textContent = item.count;
+  return td;
 }
 
 /**
