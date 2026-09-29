@@ -3633,6 +3633,7 @@ function applyUseDragToCell(key, sourceChecked) {
  * - 优先用 state.rangeOverrides 里的手动值（如 blocker 扣除后）
  * - 否则用 item.count（理论组合数）
  * - 若 action 带百分比（如 raise:60），再乘以 pct/100
+ * - 最后钳制 ≤ availableCombosForHand（确保使用组合数不超总组合数）
  * @param {{key:string, action:string, count:number}} item 手牌项
  * @returns {number} 实际计数的组合数
  */
@@ -3641,7 +3642,11 @@ function effectiveCount(item) {
     ? state.rangeOverrides[item.key]
     : item.count;
   const pct = getActionPercent(item.action);
-  return pct !== null ? base * pct / 100 : base;
+  const raw = pct !== null ? base * pct / 100 : base;
+  // 阻塞钳制：使用组合数不能超过"已扣阻塞"的可用组合数
+  const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
+  const available = availableCombosForHand(item.key, boardCards);
+  return Math.min(raw, available);
 }
 
 /**
@@ -3762,9 +3767,8 @@ function makeCountTd(item) {
   const override = state.rangeOverrides && state.rangeOverrides[item.key];
   const baseCount = override !== undefined ? override : item.count;
   const pct = getActionPercent(item.action);
-  const displayCount = (pct !== null && pct < 100)
-    ? parseFloat((baseCount * pct / 100).toFixed(2))
-    : baseCount;
+  // 使用组合数列：effectiveCount 已内置"≤ 阻塞后总组合数"的钳制
+  const displayCount = effectiveCount(item);
   const baseLabel = pct !== null && pct < 100
     ? `${displayCount} (${baseCount}×${pct}%)`
     : String(displayCount);
