@@ -976,6 +976,134 @@
   .pushfold-table td.shove { background: #ffcccc; color: #d63031; font-weight: bold; }
   .pushfold-table td.selected-pf { outline: 3px solid #fdcb6e; }
 
+  /* ============================================================
+     Tool: Range vs Range Visualizer
+     ============================================================ */
+  .rangeviz-grid {
+    display: grid;
+    grid-template-columns: repeat(13, 26px);
+    grid-template-rows: repeat(13, 26px);
+    gap: 1px;
+    background: #fff;
+    margin: 0 auto;
+  }
+  .rangeviz-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 600;
+    cursor: default;
+    transition: filter 0.1s;
+    position: relative;
+  }
+  .rangeviz-cell.r-none      { background: #f1f3f5; color: #adb5bd; }
+  .rangeviz-cell.r-hero      { background: #74b9ff; color: #2d3436; }
+  .rangeviz-cell.r-villain   { background: #ff7675; color: #2d3436; }
+  .rangeviz-cell.r-both      { background: #a29bfe; color: #2d3436; }
+  .rangeviz-cell:hover { filter: brightness(1.15); outline: 2px solid #2d3436; z-index: 2; }
+  .rangeviz-legend {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 10px 0;
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+  .rangeviz-legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .rangeviz-legend .swatch {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 2px;
+  }
+
+  /* ============================================================
+     Tool: Board Texture Analyzer
+     ============================================================ */
+  .board-display {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    margin: 8px 0;
+    min-height: 50px;
+  }
+  .board-card {
+    width: 44px;
+    height: 60px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 700;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  .board-card.s-s { background: #fff; color: #2d3436; border: 1px solid #dfe6e9; }
+  .board-card.s-h { background: #fff; color: #d63031; border: 1px solid #fab1a0; }
+  .board-card.s-d { background: #fff; color: #0984e3; border: 1px solid #74b9ff; }
+  .board-card.s-c { background: #fff; color: #2d3436; border: 1px solid #b2bec3; }
+  .board-empty {
+    width: 44px;
+    height: 60px;
+    border: 2px dashed #dfe6e9;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #b2bec3;
+    font-size: 20px;
+  }
+  .texture-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .texture-dry    { background: #d6ecff; color: #0984e3; }
+  .texture-medium { background: #fff3cd; color: #856404; }
+  .texture-wet    { background: #ffcccc; color: #d63031; }
+  .texture-paired { background: #e0e0e0; color: #2d3436; }
+  .texture-mono   { background: #fab1a0; color: #d63031; }
+
+  /* ============================================================
+     Tool: Equity Distribution Histogram
+     ============================================================ */
+  .eqhist-bar {
+    display: flex;
+    align-items: center;
+    margin: 2px 0;
+    font-size: 11px;
+    gap: 6px;
+  }
+  .eqhist-label {
+    width: 50px;
+    text-align: right;
+    color: #636e72;
+    flex-shrink: 0;
+  }
+  .eqhist-track {
+    flex: 1;
+    height: 18px;
+    background: #f1f3f5;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .eqhist-fill {
+    height: 100%;
+    background: linear-gradient(to right, #d63031 0%, #fdcb6e 50%, #00b894 100%);
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+  .eqhist-count {
+    width: 80px;
+    color: #2d3436;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
   /* Two-column layout for tools */
   .tool-2col {
     display: grid;
@@ -2064,6 +2192,9 @@
     <button data-tool="knowledge">📚 基础知识</button>
     <button data-tool="equity">⚖️ 范围胜率</button>
     <button data-tool="ev">💸 EV 决策</button>
+    <button data-tool="board">🌊 牌面分析</button>
+    <button data-tool="rangeviz">📊 范围对比</button>
+    <button data-tool="eqdist">📈 胜率分布</button>
   </div>
 
   <!-- Tool: Hand Rankings -->
@@ -2529,6 +2660,159 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Tool: Board Texture Analyzer -->
+  <div class="tool-panel" id="tool-board">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      输入 3-5 张公共牌，分析牌面湿润度、听牌数量、范围优势方和 c-bet 建议。
+    </div>
+    <div class="calc-grid">
+      <div class="calc-card">
+        <h4>🃏 公共牌</h4>
+        <div class="board-display" id="boardDisplay">
+          <div class="board-empty">?</div><div class="board-empty">?</div><div class="board-empty">?</div>
+          <div class="board-empty">?</div><div class="board-empty">?</div>
+        </div>
+        <div class="calc-input-row">
+          <label>公共牌 (空格分隔):</label>
+          <input type="text" id="boardInput" placeholder="如 Ah Kd 7s 或 As Kd Qd Jd Tc" />
+        </div>
+        <div class="calc-input-row">
+          <label>谁先行动 (preflop 进攻方):</label>
+          <select id="boardAggressor">
+            <option value="hero">我（进攻方）</option>
+            <option value="villain">对手（进攻方）</option>
+          </select>
+        </div>
+        <button class="calc-btn" id="boardRun" style="width:100%; margin-top:8px; padding:10px; background:#0984e3; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">🔍 分析牌面</button>
+      </div>
+      <div class="calc-card">
+        <h4>📊 分析结果</h4>
+        <div id="boardResult">
+          <div style="text-align:center; margin:12px 0;">
+            <span class="texture-badge texture-dry" id="boardTextureBadge">—</span>
+          </div>
+          <div class="calc-result" style="margin-top:8px;">
+            <div class="result-label">湿润度评分</div>
+            <div class="result-value" id="boardScore">—</div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;">
+            <div class="calc-result"><div class="result-label">顺子听牌</div><div class="result-value" id="boardStraightDraws" style="font-size:14px;">—</div></div>
+            <div class="calc-result"><div class="result-label">同花听牌</div><div class="result-value" id="boardFlushDraws" style="font-size:14px;">—</div></div>
+            <div class="calc-result"><div class="result-label">高牌</div><div class="result-value" id="boardHighCard" style="font-size:14px;">—</div></div>
+            <div class="calc-result"><div class="result-label">连接度</div><div class="result-value" id="boardConnectivity" style="font-size:14px;">—</div></div>
+          </div>
+          <div class="calc-result" style="margin-top:10px;" id="boardAdvantage">
+            <div class="result-label">范围优势方</div>
+            <div class="result-value" id="boardAdvantageVal" style="font-size:14px;">—</div>
+          </div>
+          <div class="calc-formula" id="boardFormula">
+            评分：顺子听牌 ×2 + 同花 ×3 + 连接 +2 / 张；高牌 +1
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tool: Range vs Range Visualizer -->
+  <div class="tool-panel" id="tool-rangeviz">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      输入两个范围，可视化对比：双方独有的手牌用蓝/红标记，重叠部分用紫色。下方统计重叠率、组合数、典型手牌类型。
+    </div>
+    <div class="calc-grid">
+      <div class="calc-card">
+        <h4>📥 两个范围</h4>
+        <div class="calc-input-row">
+          <label>范围 A (蓝):</label>
+          <input type="text" id="rvHero" value="22+, A2s+, K9s+, QTs+, JTs, ATo+, KQo" />
+        </div>
+        <div class="calc-input-row">
+          <label>范围 B (红):</label>
+          <input type="text" id="rvVillain" value="AA, KK, QQ, AKs, AKo, AQs" />
+        </div>
+        <button class="calc-btn" id="rvRun" style="width:100%; margin-top:8px; padding:10px; background:#74b9ff; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">🎨 生成对比图</button>
+      </div>
+      <div class="calc-card">
+        <h4>🎯 重叠统计</h4>
+        <div id="rvStats">
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+            <div class="calc-result" style="border-left-color:#74b9ff;"><div class="result-label">A 范围 %</div><div class="result-value" id="rvHeroPct" style="font-size:14px;">—</div></div>
+            <div class="calc-result" style="border-left-color:#ff7675;"><div class="result-label">B 范围 %</div><div class="result-value" id="rvVillainPct" style="font-size:14px;">—</div></div>
+            <div class="calc-result" style="border-left-color:#a29bfe;"><div class="result-label">重叠 %</div><div class="result-value" id="rvOverlapPct" style="font-size:14px;">—</div></div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+            <div class="calc-result"><div class="result-label">A 组合数</div><div class="result-value" id="rvHeroCombos" style="font-size:14px;">—</div></div>
+            <div class="calc-result"><div class="result-label">B 组合数</div><div class="result-value" id="rvVillainCombos" style="font-size:14px;">—</div></div>
+            <div class="calc-result"><div class="result-label">共享组合</div><div class="result-value" id="rvSharedCombos" style="font-size:14px;">—</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="calc-card" style="margin-top:10px;">
+      <h4 style="text-align:center;">🟦 范围 A  🟥 范围 B  🟪 重叠</h4>
+      <div class="rangeviz-legend">
+        <span><i class="swatch" style="background:#74b9ff;"></i>仅 A</span>
+        <span><i class="swatch" style="background:#ff7675;"></i>仅 B</span>
+        <span><i class="swatch" style="background:#a29bfe;"></i>双方都有</span>
+        <span><i class="swatch" style="background:#f1f3f5;border:1px solid #ddd;"></i>无</span>
+      </div>
+      <div class="rangeviz-grid" id="rvGrid"></div>
+    </div>
+  </div>
+
+  <!-- Tool: Equity Distribution -->
+  <div class="tool-panel" id="tool-eqdist">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      不只算平均胜率，还要看分布：每手牌的胜率分桶显示 + 方差/中位数。揭示"哪些手牌稳赚 / 哪些是高方差"。
+    </div>
+    <div class="calc-grid">
+      <div class="calc-card">
+        <h4>📥 范围输入</h4>
+        <div class="calc-input-row">
+          <label>你的范围:</label>
+          <input type="text" id="edHero" value="22+, ATs+, KQs, AJo+, KQo" />
+        </div>
+        <div class="calc-input-row">
+          <label>对手范围:</label>
+          <input type="text" id="edVillain" value="AA, KK, QQ, AKs, AKo, AQs, AJs, KQs" />
+        </div>
+        <div class="calc-input-row">
+          <label>公共牌 (可选):</label>
+          <input type="text" id="edBoard" placeholder="如 Ah Kd 7s" />
+        </div>
+        <div class="calc-input-row">
+          <label>每手牌采样:</label>
+          <input type="number" id="edSamples" value="80" min="20" max="500" />
+        </div>
+        <button class="calc-btn" id="edRun" style="width:100%; margin-top:8px; padding:10px; background:#00b894; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">📊 计算分布</button>
+      </div>
+      <div class="calc-card">
+        <h4>📈 统计指标</h4>
+        <div id="edStats">
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:8px;">
+            <div class="calc-result good"><div class="result-label">平均胜率</div><div class="result-value" id="edMean" style="font-size:14px;">—</div></div>
+            <div class="calc-result"><div class="result-label">中位数</div><div class="result-value" id="edMedian" style="font-size:14px;">—</div></div>
+            <div class="calc-result"><div class="result-label">标准差</div><div class="result-value" id="edStddev" style="font-size:14px;">—</div></div>
+            <div class="calc-result warn"><div class="result-label">最差组合</div><div class="result-value" id="edMin" style="font-size:14px;">—</div></div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+            <div class="calc-result good"><div class="result-label">胜率 ≥60%</div><div class="result-value" id="edHigh" style="font-size:14px;">—</div></div>
+            <div class="calc-result warn"><div class="result-label">胜率 30-60%</div><div class="result-value" id="edMid" style="font-size:14px;">—</div></div>
+            <div class="calc-result bad"><div class="result-label">胜率 <30%</div><div class="result-value" id="edLow" style="font-size:14px;">—</div></div>
+          </div>
+          <div class="calc-formula" id="edFormula">点击「计算分布」开始</div>
+        </div>
+      </div>
+    </div>
+    <div class="calc-card" style="margin-top:10px;">
+      <h4>📊 胜率分布直方图（10 桶：0-100%）</h4>
+      <div id="edHistogram"></div>
+    </div>
+    <div class="calc-card" style="margin-top:10px;">
+      <h4>🃏 顶部 10 手牌（按胜率排序）</h4>
+      <div id="edTopHands" style="max-height:300px; overflow-y:auto;"></div>
     </div>
   </div>
 </div>
@@ -6212,6 +6496,9 @@ document.querySelectorAll('.tools-tabs button').forEach(btn => {
     if (target === 'pushfold') renderPushFold();
     if (target === 'equity') runEquityCalc();
     if (target === 'ev') runEVCalc();
+    if (target === 'board') runBoardAnalyze();
+    if (target === 'rangeviz') runRangeViz();
+    if (target === 'eqdist') runEqDist();
   });
 });
 
@@ -9238,6 +9525,432 @@ function runEVCalc() {
 
 document.getElementById('evRun').addEventListener('click', runEVCalc);
 document.getElementById('evFoldEq').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEVCalc(); });
+
+/* ============================================================
+   Tool: Board Texture Analyzer
+   ============================================================ */
+
+/** Rank → 数值（A=14, K=13, ... 2=2），用于牌面结构分析 */
+function _boardRankValue(r) {
+  return RANKS.indexOf(r) === 0 ? 14 : 14 - RANKS.indexOf(r);  // RANKS[0]='A' → 14
+}
+
+/**
+ * 给定公共牌字符串数组，返回牌面结构分析结果
+ * @param {string[]} boardCards 已规范化的牌数组，如 ["Ah","Kd","7s"]
+ * @returns {object} { highCard, isPaired, isSuited, connectedness, draws: { flush, oesd, gutshot }, score, category }
+ */
+function _analyzeBoard(boardCards) {
+  if (boardCards.length < 3) return { error: '至少需要 3 张公共牌（翻牌）' };
+  const ranks = boardCards.map(c => c[0]);
+  const suits = boardCards.map(c => c[1]);
+  const rankVals = ranks.map(_boardRankValue).sort((a, b) => b - a);
+  const highCard = rankVals[0];
+
+  // 配对 / 三条 / 四条检测
+  const rankCount = {};
+  ranks.forEach(r => rankCount[r] = (rankCount[r] || 0) + 1);
+  const maxCount = Math.max(...Object.values(rankCount));
+  const isPaired = maxCount >= 2;
+
+  // 同花检测
+  const suitCount = {};
+  suits.forEach(s => suitCount[s] = (suitCount[s] || 0) + 1);
+  const maxSuit = Math.max(...Object.values(suitCount));
+  const isMonotone = maxSuit >= 3 && boardCards.length === 3;
+
+  // 连接度：相邻牌差值 ≤ 2 计 1，差值 = 1 强连接
+  const uniqueRanks = [...new Set(rankVals)].sort((a, b) => b - a);
+  let connectedness = 0;
+  for (let i = 0; i < uniqueRanks.length - 1; i++) {
+    const gap = uniqueRanks[i] - uniqueRanks[i + 1];
+    if (gap === 1) connectedness += 2;  // 直接相连
+    else if (gap === 2) connectedness += 1;  // 一张间隔
+    else if (gap <= 4) connectedness += 0.3;  // 准连接（A-2 视为相连）
+  }
+  // 特殊：A-2 视作相连（轮 A 的特别规则）
+  if (uniqueRanks.includes(14) && uniqueRanks.includes(2)) connectedness += 1;
+
+  // 同花听牌数
+  let flushDraws = 0;
+  if (boardCards.length === 3) {
+    if (maxSuit === 2) flushDraws = 1;  // 翻牌 2 张同花 = 1 个后门同花
+    if (maxSuit === 3 && !isMonotone) flushDraws = 1;  // 翻牌全同花（单色湿润）
+  } else if (boardCards.length === 4) {
+    if (maxSuit === 3) flushDraws = 1;
+    if (maxSuit === 4 && !isMonotone) flushDraws = 1;  // 转牌单花已开
+  } else if (boardCards.length === 5 && maxSuit >= 4) {
+    flushDraws = 1;  // 河牌已成
+  }
+
+  // 顺子听牌检测（OESD = 4 张连续牌，gutshot = 4 张缺一）
+  let oesd = 0, gutshot = 0;
+  const allUniqueRanks = new Set([14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 14, 2]);  // 加入 A 顶/底
+  const boardRankSet = new Set(rankVals);
+  // 检查所有 5 张窗口能否形成 4 张缺 1 的窗口
+  const windows = [];
+  for (let top = 14; top >= 5; top--) {
+    const window = [top, top - 1, top - 2, top - 3];
+    windows.push(window);
+  }
+  // A-low: A-2-3-4-5
+  windows.push([5, 4, 3, 2, 14].slice(0, 4));  // 2-3-4-5
+  windows.push([14, 5, 4, 3, 2]);  // A-2-3-4
+  for (const w of windows) {
+    const hits = w.filter(r => boardRankSet.has(r)).length;
+    if (hits === 4) oesd++;
+    else if (hits === 3) gutshot++;
+  }
+
+  // 总评分
+  let score = 0;
+  score += flushDraws * 3;
+  score += oesd * 2;
+  score += gutshot * 1;
+  score += connectedness;
+  if (isMonotone) score += 4;
+  if (isPaired) score += 0;  // 配对中等湿润
+  score += (highCard - 10) * 0.2;  // 高牌微调
+
+  // 分类
+  let category;
+  if (isPaired && boardCards.length === 3) category = '配对';
+  else if (isMonotone) category = '单色';
+  else if (score >= 7) category = '湿润';
+  else if (score >= 4) category = '中性';
+  else category = '干燥';
+
+  return {
+    highCard: RANKS[14 - highCard] || 'A',
+    highCardVal: highCard,
+    isPaired, isMonotone,
+    connectedness: Math.round(connectedness * 10) / 10,
+    flushDraws, oesd, gutshot,
+    score: Math.round(score * 10) / 10,
+    category,
+  };
+}
+
+function runBoardAnalyze() {
+  const input = (document.getElementById('boardInput').value || '').trim();
+  const cards = input ? input.split(/[\s,]+/).map(_normalizeCard).filter(Boolean) : [];
+  const display = document.getElementById('boardDisplay');
+  // 重渲染 board display
+  display.innerHTML = '';
+  const slots = 5;
+  for (let i = 0; i < slots; i++) {
+    if (cards[i]) {
+      const c = cards[i];
+      const suitClass = 's-' + c[1];
+      const el = document.createElement('div');
+      el.className = 'board-card ' + suitClass;
+      el.textContent = c;
+      display.appendChild(el);
+    } else {
+      const el = document.createElement('div');
+      el.className = 'board-empty';
+      el.textContent = '?';
+      display.appendChild(el);
+    }
+  }
+  if (cards.length < 3) {
+    document.getElementById('boardTextureBadge').textContent = '—';
+    document.getElementById('boardTextureBadge').className = 'texture-badge texture-dry';
+    document.getElementById('boardScore').textContent = '—';
+    document.getElementById('boardStraightDraws').textContent = '—';
+    document.getElementById('boardFlushDraws').textContent = '—';
+    document.getElementById('boardHighCard').textContent = '—';
+    document.getElementById('boardConnectivity').textContent = '—';
+    document.getElementById('boardAdvantageVal').textContent = '—';
+    document.getElementById('boardFormula').textContent = '⚠ 至少需要 3 张公共牌';
+    return;
+  }
+  const analysis = _analyzeBoard(cards);
+  // 更新 badge
+  const badge = document.getElementById('boardTextureBadge');
+  badge.textContent = analysis.category + '（' + cards.length + '张）';
+  badge.className = 'texture-badge texture-' + (
+    analysis.category === '干燥' ? 'dry' :
+    analysis.category === '中性' ? 'medium' :
+    analysis.category === '湿润' ? 'wet' :
+    analysis.category === '单色' ? 'mono' : 'paired'
+  );
+  document.getElementById('boardScore').textContent = analysis.score.toFixed(1);
+  document.getElementById('boardStraightDraws').textContent = `${analysis.oesd} OESD + ${analysis.gutshot} 内听`;
+  document.getElementById('boardFlushDraws').textContent = analysis.flushDraws + ' 个';
+  document.getElementById('boardHighCard').textContent = analysis.highCard;
+  document.getElementById('boardConnectivity').textContent = analysis.connectedness.toFixed(1) + (analysis.isPaired ? '（配对）' : '');
+
+  // 范围优势启发式：preflop 进攻方在配对/高牌/A-rish 牌面更受益
+  const aggressor = document.getElementById('boardAggressor').value;
+  const advEl = document.getElementById('boardAdvantage');
+  const advVal = document.getElementById('boardAdvantageVal');
+  let advText, advWho;
+  // 高牌 ≥ J 且连接度低 + 单色/湿润 → 防守方受益
+  // 高牌 ≤ T 或湿润 → 进攻方更需小心
+  const isLowBoard = analysis.highCardVal <= 10;
+  if (analysis.category === '湿润' || analysis.category === '单色') {
+    advWho = aggressor === 'hero' ? 'villain' : 'hero';
+    advText = `⚠ ${advWho === 'hero' ? '我' : '对手'} 受益（湿润牌面，听牌多）`;
+  } else if (analysis.isPaired) {
+    advWho = aggressor === 'hero' ? 'hero' : 'villain';
+    advText = `配对牌面 → ${advWho === 'hero' ? '我' : '对手'} 受益（进攻方）`;
+  } else if (isLowBoard) {
+    advWho = aggressor === 'hero' ? 'villain' : 'hero';
+    advText = `低牌面 → ${advWho === 'hero' ? '我' : '对手'} 受益（高牌优势）`;
+  } else {
+    advWho = aggressor === 'hero' ? 'hero' : 'villain';
+    advText = `${advWho === 'hero' ? '我' : '对手'} 略占优势（干燥高牌）`;
+  }
+  advVal.textContent = advText;
+  advEl.className = 'calc-result ' + (advWho === 'hero' ? 'good' : 'warn');
+
+  document.getElementById('boardFormula').textContent =
+    `评分 ${analysis.score.toFixed(1)} · ${analysis.category} · ${analysis.flushDraws} 同花 / ${analysis.oesd} 顺子 / ${analysis.gutshot} 内听 · 高牌 ${analysis.highCard}`;
+}
+
+document.getElementById('boardRun').addEventListener('click', runBoardAnalyze);
+document.getElementById('boardInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runBoardAnalyze(); });
+
+/* ============================================================
+   Tool: Range vs Range Visualizer
+   ============================================================ */
+
+/**
+ * 生成 13×13 对比网格的 HTML，颜色编码 4 个状态
+ * @param {Map<string,number>} heroMap A 范围
+ * @param {Map<string,number>} villMap B 范围
+ * @returns {string} HTML 字符串
+ */
+function _renderRangeVizGrid(heroMap, villMap) {
+  let html = '';
+  for (let r = 0; r < 13; r++) {
+    for (let c = 0; c < 13; c++) {
+      const key = handKey(r, c);
+      const inHero = (heroMap.get(key) || 0) > 0;
+      const inVill = (villMap.get(key) || 0) > 0;
+      let cls;
+      if (inHero && inVill) cls = 'r-both';
+      else if (inHero) cls = 'r-hero';
+      else if (inVill) cls = 'r-villain';
+      else cls = 'r-none';
+      const tip = inHero && inVill
+        ? `${key}：双方都有（A: ${heroMap.get(key)}%, B: ${villMap.get(key)}%）`
+        : inHero ? `${key}：仅 A (${heroMap.get(key)}%)`
+        : inVill ? `${key}：仅 B (${villMap.get(key)}%)`
+        : `${key}：无`;
+      html += `<div class="rangeviz-cell ${cls}" title="${tip}">${key}</div>`;
+    }
+  }
+  return html;
+}
+
+/**
+ * 计算两个范围的重叠统计
+ * @param {Map<string,number>} heroMap
+ * @param {Map<string,number>} villMap
+ * @returns {object} { heroPct, villPct, overlapPct, heroCombos, villCombos, sharedCombos }
+ */
+function _calcRangeOverlapStats(heroMap, villMap) {
+  let heroPct = 0, villPct = 0, overlapPct = 0;
+  let heroCombos = 0, villCombos = 0, sharedCombos = 0;
+  const allKeys = new Set([...heroMap.keys(), ...villMap.keys()]);
+  for (const key of allKeys) {
+    const hp = heroMap.get(key) || 0;
+    const vp = villMap.get(key) || 0;
+    heroPct += hp;
+    villPct += vp;
+    overlapPct += Math.min(hp, vp);
+    const combos = comboCount(key);
+    heroCombos += (hp / 100) * combos;
+    villCombos += (vp / 100) * combos;
+    sharedCombos += (Math.min(hp, vp) / 100) * combos;
+  }
+  return {
+    heroPct: Math.round(heroPct * 10) / 10,
+    villPct: Math.round(villPct * 10) / 10,
+    overlapPct: Math.round(overlapPct * 10) / 10,
+    heroCombos: Math.round(heroCombos * 10) / 10,
+    villCombos: Math.round(villCombos * 10) / 10,
+    sharedCombos: Math.round(sharedCombos * 10) / 10,
+  };
+}
+
+function runRangeViz() {
+  const heroStr = (document.getElementById('rvHero').value || '').trim();
+  const villStr = (document.getElementById('rvVillain').value || '').trim();
+  if (!heroStr || !villStr) {
+    document.getElementById('rvHeroPct').textContent = '—';
+    document.getElementById('rvVillainPct').textContent = '—';
+    document.getElementById('rvOverlapPct').textContent = '—';
+    document.getElementById('rvHeroCombos').textContent = '—';
+    document.getElementById('rvVillainCombos').textContent = '—';
+    document.getElementById('rvSharedCombos').textContent = '—';
+    return;
+  }
+  const heroMap = parseRangeString(heroStr);
+  const villMap = parseRangeString(villStr);
+  const stats = _calcRangeOverlapStats(heroMap, villMap);
+  document.getElementById('rvHeroPct').textContent = stats.heroPct.toFixed(1) + '%';
+  document.getElementById('rvVillainPct').textContent = stats.villPct.toFixed(1) + '%';
+  document.getElementById('rvOverlapPct').textContent = stats.overlapPct.toFixed(1) + '%';
+  document.getElementById('rvHeroCombos').textContent = stats.heroCombos.toFixed(0);
+  document.getElementById('rvVillainCombos').textContent = stats.villCombos.toFixed(0);
+  document.getElementById('rvSharedCombos').textContent = stats.sharedCombos.toFixed(0);
+  document.getElementById('rvGrid').innerHTML = _renderRangeVizGrid(heroMap, villMap);
+}
+
+document.getElementById('rvRun').addEventListener('click', runRangeViz);
+document.getElementById('rvHero').addEventListener('keydown', (e) => { if (e.key === 'Enter') runRangeViz(); });
+document.getElementById('rvVillain').addEventListener('keydown', (e) => { if (e.key === 'Enter') runRangeViz(); });
+
+/* ============================================================
+   Tool: Equity Distribution (per-hand histogram)
+   ============================================================ */
+
+/**
+ * 计算 hero 范围内每手牌对 villain 范围的平均胜率（蒙特卡洛）
+ * @param {object} opts
+ * @param {string} opts.hero
+ * @param {string} opts.villain
+ * @param {string[]} [opts.board=[]]
+ * @param {number} [opts.samplesPerHand=80]
+ * @returns {Array<{key:string, equity:number, samples:number}>} 按 handKey 数组
+ */
+function _calcPerHandEquity({ hero, villain, board = [], samplesPerHand = 80 }) {
+  const normalizedBoard = board.map(_normalizeCard).filter(Boolean);
+  const blockedFromBoard = new Set(normalizedBoard);
+  const heroCombos = _rangeToWeightedCombos(hero, [...blockedFromBoard]);
+  const villCombos = _rangeToWeightedCombos(villain, [...blockedFromBoard]);
+  if (heroCombos.length === 0 || villCombos.length === 0) return [];
+
+  const deck = [];
+  for (const r of RANKS) for (const s of SUITS) {
+    const card = r + s.name;
+    if (!blockedFromBoard.has(card)) deck.push(card);
+  }
+  const cardsNeeded = 5 - normalizedBoard.length;
+
+  // 按 handKey 分组
+  const perKey = new Map();
+  for (const c of heroCombos) {
+    if (!perKey.has(c.handKey)) perKey.set(c.handKey, []);
+    perKey.get(c.handKey).push(c);
+  }
+  const results = [];
+  for (const [key, combos] of perKey) {
+    let wins = 0, ties = 0, total = 0;
+    for (let i = 0; i < samplesPerHand; i++) {
+      const pool = deck.slice();
+      const drawnBoard = _drawCards(pool, cardsNeeded);
+      const fullBoard = normalizedBoard.concat(drawnBoard);
+      const hc = _weightedPick(combos);
+      const vc = _weightedPick(villCombos);
+      if (!hc || !vc) continue;
+      const usedCards = new Set([hc.cards[0], hc.cards[1], vc.cards[0], vc.cards[1]]);
+      if (usedCards.size !== 4) continue;
+      const hb = abBestHandFrom7(hc.cards, fullBoard);
+      const vb = abBestHandFrom7(vc.cards, fullBoard);
+      if (!hb || !vb) continue;
+      const w = hc.weight * vc.weight;
+      total += w;
+      if (hb.score > vb.score) wins += w;
+      else if (hb.score === vb.score) ties += w;
+    }
+    const equity = total > 0 ? (wins + ties * 0.5) / total : 0;
+    results.push({ key, equity, samples: total });
+  }
+  return results;
+}
+
+function runEqDist() {
+  const heroStr = (document.getElementById('edHero').value || '').trim();
+  const villStr = (document.getElementById('edVillain').value || '').trim();
+  const boardStr = (document.getElementById('edBoard').value || '').trim();
+  const samplesPerHand = parseInt(document.getElementById('edSamples').value, 10) || 80;
+  if (!heroStr || !villStr) {
+    document.getElementById('edFormula').textContent = '⚠ 请输入范围';
+    return;
+  }
+  const boardCards = boardStr ? boardStr.split(/[\s,]+/).map(_normalizeCard).filter(Boolean) : [];
+  const formulaEl = document.getElementById('edFormula');
+  formulaEl.textContent = '🎲 采样中...';
+  document.getElementById('edMean').textContent = '...';
+  document.getElementById('edMedian').textContent = '...';
+  document.getElementById('edStddev').textContent = '...';
+  document.getElementById('edMin').textContent = '...';
+  document.getElementById('edHigh').textContent = '...';
+  document.getElementById('edMid').textContent = '...';
+  document.getElementById('edLow').textContent = '...';
+  document.getElementById('edHistogram').innerHTML = '';
+  document.getElementById('edTopHands').innerHTML = '';
+  setTimeout(() => {
+    const results = _calcPerHandEquity({ hero: heroStr, villain: villStr, board: boardCards, samplesPerHand });
+    if (results.length === 0) {
+      formulaEl.textContent = '⚠ 范围无有效组合';
+      return;
+    }
+    // 统计
+    const equities = results.map(r => r.equity);
+    const mean = equities.reduce((s, x) => s + x, 0) / equities.length;
+    const sorted = [...equities].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const variance = equities.reduce((s, x) => s + (x - mean) ** 2, 0) / equities.length;
+    const stddev = Math.sqrt(variance);
+    const min = sorted[0];
+    let highCount = 0, midCount = 0, lowCount = 0;
+    equities.forEach(eq => {
+      if (eq >= 0.6) highCount++;
+      else if (eq >= 0.3) midCount++;
+      else lowCount++;
+    });
+    document.getElementById('edMean').textContent = (mean * 100).toFixed(1) + '%';
+    document.getElementById('edMedian').textContent = (median * 100).toFixed(1) + '%';
+    document.getElementById('edStddev').textContent = (stddev * 100).toFixed(1) + '%';
+    document.getElementById('edMin').textContent = (min * 100).toFixed(1) + '%';
+    document.getElementById('edHigh').textContent = highCount + ' 手';
+    document.getElementById('edMid').textContent = midCount + ' 手';
+    document.getElementById('edLow').textContent = lowCount + ' 手';
+    formulaEl.textContent = `${results.length} 手牌 × ${samplesPerHand} 次采样 · 公共牌 ${boardCards.length} 张 · 加权平均`;
+
+    // 直方图（10 桶）
+    const buckets = new Array(10).fill(0);
+    equities.forEach(eq => {
+      const idx = Math.min(9, Math.floor(eq * 10));
+      buckets[idx]++;
+    });
+    const maxBucket = Math.max(...buckets, 1);
+    let histHtml = '';
+    for (let i = 0; i < 10; i++) {
+      const lo = i * 10, hi = (i + 1) * 10;
+      const pct = (buckets[i] / equities.length * 100).toFixed(0);
+      const widthPct = (buckets[i] / maxBucket * 100).toFixed(0);
+      const colorBar = i >= 6 ? '#00b894' : i >= 3 ? '#fdcb6e' : '#d63031';
+      histHtml += `<div class="eqhist-bar">
+        <div class="eqhist-label">${lo}-${hi}%</div>
+        <div class="eqhist-track"><div class="eqhist-fill" style="width:${widthPct}%; background:${colorBar};"></div></div>
+        <div class="eqhist-count">${buckets[i]} 手 (${pct}%)</div>
+      </div>`;
+    }
+    document.getElementById('edHistogram').innerHTML = histHtml;
+
+    // 顶部 10 手牌（按胜率排序）
+    const top10 = [...results].sort((a, b) => b.equity - a.equity).slice(0, 10);
+    let topHtml = '<table style="width:100%; font-size:11px; border-collapse:collapse;">';
+    topHtml += '<tr style="background:#f8f9fa;"><th style="padding:4px;">手牌</th><th style="padding:4px;">胜率</th><th style="padding:4px;">条</th></tr>';
+    top10.forEach(r => {
+      const pct = (r.equity * 100).toFixed(1);
+      const color = r.equity >= 0.6 ? '#00b894' : r.equity >= 0.3 ? '#fdcb6e' : '#d63031';
+      topHtml += `<tr><td style="padding:4px; font-weight:bold;">${r.key}</td><td style="padding:4px; color:${color};">${pct}%</td><td style="padding:4px;">${r.samples.toFixed(0)}</td></tr>`;
+    });
+    topHtml += '</table>';
+    document.getElementById('edTopHands').innerHTML = topHtml;
+  }, 50);
+}
+
+document.getElementById('edRun').addEventListener('click', runEqDist);
+document.getElementById('edHero').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEqDist(); });
+document.getElementById('edVillain').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEqDist(); });
 </script>
 
 </body>
