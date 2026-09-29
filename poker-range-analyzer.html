@@ -1920,15 +1920,15 @@
         <tr>
           <th class="col-pair" style="width:15%">手对子</th>
           <th class="col-pair" style="width:8%" title="实际使用的组合数（理论 × 百分比 或 rangeOverrides）。**不扣除**公共牌阻塞。">使用组合数</th>
-          <th class="col-pair" style="width:7%" title="理论最大组合数扣除公共牌阻塞后的剩余可用数（对子=6 起步）。**不应用**百分比/覆盖。">总组合数</th>
+          <th class="col-pair" style="width:7%" title="理论最大组合数 × open 频率（按 action 的百分比，如 raise:50 → 50%）。**不扣**阻塞、不应用 override。">总组合数</th>
           <th class="col-pair" style="width:7%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
           <th class="col-suited" style="width:15%">同花</th>
           <th class="col-suited" style="width:8%" title="实际使用的组合数（理论 × 百分比 或 rangeOverrides）。**不扣除**公共牌阻塞。">使用组合数</th>
-          <th class="col-suited" style="width:7%" title="理论最大组合数扣除公共牌阻塞后的剩余可用数（同花=4 起步）。**不应用**百分比/覆盖。">总组合数</th>
+          <th class="col-suited" style="width:7%" title="理论最大组合数 × open 频率（按 action 的百分比，如 raise:50 → 50%）。**不扣**阻塞、不应用 override。">总组合数</th>
           <th class="col-suited" style="width:7%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
           <th class="col-off" style="width:15%">非同花</th>
           <th class="col-off" style="width:8%" title="实际使用的组合数（理论 × 百分比 或 rangeOverrides）。**不扣除**公共牌阻塞。">使用组合数</th>
-          <th class="col-off" style="width:7%" title="理论最大组合数扣除公共牌阻塞后的剩余可用数（非同花=12 起步）。**不应用**百分比/覆盖。">总组合数</th>
+          <th class="col-off" style="width:7%" title="理论最大组合数 × open 频率（按 action 的百分比，如 raise:50 → 50%）。**不扣**阻塞、不应用 override。">总组合数</th>
           <th class="col-off" style="width:7%" title="勾选表示该手牌正在使用中（计入右侧统计）。未勾选 = 不使用。">使用</th>
         </tr>
       </thead>
@@ -3405,21 +3405,20 @@ function renderBreakdown() {
   const trow = document.createElement('tr');
   trow.style.fontWeight = 'bold';
   trow.style.background = '#f1f3f5';
-  // 总组合数小计：扣除公共牌阻塞后的可用组合数
-  const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
-  const sumAvailable = arr => arr.reduce((s, x) => s + availableCombosForHand(x.key, boardCards), 0);
+  // 总组合数小计：理论 × open 频率（不扣阻塞，不应用 override）
+  const sumByOpenFreq = arr => arr.reduce((s, x) => s + theoreticalByOpenFreq(x), 0);
   trow.innerHTML = `
     <td>${bd.pairs.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.pairs))}</td>
-    <td>${fmtCount(sumAvailable(bd.pairs))}</td>
+    <td>${fmtCount(sumByOpenFreq(bd.pairs))}</td>
     <td></td>
     <td>${bd.suiteds.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.suiteds))}</td>
-    <td>${fmtCount(sumAvailable(bd.suiteds))}</td>
+    <td>${fmtCount(sumByOpenFreq(bd.suiteds))}</td>
     <td></td>
     <td>${bd.offs.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.offs))}</td>
-    <td>${fmtCount(sumAvailable(bd.offs))}</td>
+    <td>${fmtCount(sumByOpenFreq(bd.offs))}</td>
     <td></td>
   `;
   tbody.appendChild(trow);
@@ -3515,9 +3514,24 @@ function availableCombosForHand(key, boardCards) {
 }
 
 /**
- * 为 breakdown 表里某行生成"总组合数" td（理论最大 - 公共牌阻塞）
- * - 对子=6、同花=4、异花=12 起步，扣除与 state.board 冲突的组合
- * - 与"使用组合数"列的差异：本列扣除阻塞；使用组合数只反映百分比/覆盖
+ * 计算某手牌的"理论 × open 频率"（按用户的 open 频率打折后的最大期望组合数）
+ * - 取 action 的百分比（raise:50 → 50%），无百分比时视为 100%
+ * - 不应用 rangeOverrides（override 只影响实际使用，不影响理论最大）
+ * - 不扣除阻塞（blocker 走"使用"列的钳制）
+ * @param {{key:string, action:string, count:number}} item
+ * @returns {number} 打折后的最大期望组合数
+ */
+function theoreticalByOpenFreq(item) {
+  if (!item) return 0;
+  const pct = getActionPercent(item.action);
+  return pct !== null && pct < 100 ? item.count * pct / 100 : item.count;
+}
+
+/**
+ * 为 breakdown 表里某行生成"总组合数" td（理论 × open 频率）
+ * - 对子=6、同花=4、异花=12 起步，按 action 的百分比（raise:50 → 50%）打折
+ * - 不应用阻塞（blocker 钳制走"使用组合数"列的 min）
+ * - 不应用 rangeOverrides（override 只影响实际使用）
  * @param {{key:string, action:string, count:number}|null} item 单个手牌项；null 时返回空 td
  * @returns {HTMLTableCellElement} td 节点
  */
@@ -3526,8 +3540,7 @@ function makeTotalCountTd(item) {
   td.classList.add('total-count-cell');
   if (!item) return td;
   td.dataset.hand = item.key;
-  const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
-  td.textContent = availableCombosForHand(item.key, boardCards);
+  td.textContent = theoreticalByOpenFreq(item);
   return td;
 }
 
