@@ -2062,6 +2062,8 @@
     <button data-tool="pushfold">⚡ Push/Fold 图表</button>
     <button data-tool="betting">💵 下注尺寸</button>
     <button data-tool="knowledge">📚 基础知识</button>
+    <button data-tool="equity">⚖️ 范围胜率</button>
+    <button data-tool="ev">💸 EV 决策</button>
   </div>
 
   <!-- Tool: Hand Rankings -->
@@ -2420,6 +2422,110 @@
               <div class="stat-num">1326</div>
               <div class="stat-lbl">总数 C(52,2)</div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tool: Equity vs Range -->
+  <div class="tool-panel" id="tool-equity">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      蒙特卡洛模拟你的手牌 vs 对手范围的胜率（500 次采样）。支持手牌、范围、混合百分比。
+      <br>留空公共牌 = 模拟到摊牌（5 张随机公共牌）。
+    </div>
+    <div class="calc-grid">
+      <div class="calc-card">
+        <h4>⚖️ 输入</h4>
+        <div class="calc-input-row">
+          <label>你的手牌/范围:</label>
+          <input type="text" id="eqHero" value="AA, AKs, AKo" placeholder="如 AA 或 22+, ATs+, KJs+" />
+        </div>
+        <div class="calc-input-row">
+          <label>对手范围:</label>
+          <input type="text" id="eqVillain" value="22+, A2s+, K9s+, QTs+, JTs, ATo+, KQo" placeholder="对手范围字符串" />
+        </div>
+        <div class="calc-input-row">
+          <label>公共牌 (可选):</label>
+          <input type="text" id="eqBoard" placeholder="如 Ah Kd 7s（0-5 张，留空=模拟到河牌）" />
+        </div>
+        <div class="calc-input-row">
+          <label>采样数:</label>
+          <input type="number" id="eqSamples" value="500" min="100" max="5000" />
+        </div>
+        <button class="calc-btn" id="eqRun" style="width:100%; margin-top:8px; padding:10px; background:#0984e3; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">🎲 运行模拟</button>
+      </div>
+      <div class="calc-card">
+        <h4>📊 结果</h4>
+        <div id="eqResult">
+          <div class="calc-result good">
+            <div class="result-label">胜率（Equity）</div>
+            <div class="result-value" id="eqEquity">—</div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:10px;">
+            <div class="calc-result" style="border-left-color:#00b894;">
+              <div class="result-label">胜</div>
+              <div class="result-value" id="eqWins" style="font-size:14px;">—</div>
+            </div>
+            <div class="calc-result" style="border-left-color:#fdcb6e;">
+              <div class="result-label">平</div>
+              <div class="result-value" id="eqTies" style="font-size:14px;">—</div>
+            </div>
+            <div class="calc-result bad">
+              <div class="result-label">负</div>
+              <div class="result-value" id="eqLosses" style="font-size:14px;">—</div>
+            </div>
+          </div>
+          <div class="calc-formula" id="eqFormula">点击"运行模拟"开始计算</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tool: EV Decision -->
+  <div class="tool-panel" id="tool-ev">
+    <div style="font-size:12px; color:#636e72; margin-bottom:10px;">
+      EV 决策助手：给定底池/跟注/胜率/弃牌感，计算跟注 EV 与诈唬 EV，给出 +EV / -EV 判断。
+    </div>
+    <div class="calc-grid">
+      <div class="calc-card">
+        <h4>💸 输入场景</h4>
+        <div class="calc-input-row">
+          <label>当前底池 (BB):</label>
+          <input type="number" id="evPot" value="10" min="0" step="0.1" />
+        </div>
+        <div class="calc-input-row">
+          <label>跟注额 / 下注额 (BB):</label>
+          <input type="number" id="evCall" value="5" min="0" step="0.1" />
+        </div>
+        <div class="calc-input-row">
+          <label>我的胜率 (%):</label>
+          <input type="number" id="evEquity" value="35" min="0" max="100" step="0.1" />
+        </div>
+        <div class="calc-input-row">
+          <label>弃牌感 (Fold Equity %):</label>
+          <input type="number" id="evFoldEq" value="0" min="0" max="100" step="0.1" placeholder="0（=纯跟注）" />
+        </div>
+        <button class="calc-btn" id="evRun" style="width:100%; margin-top:8px; padding:10px; background:#00b894; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">🧮 计算 EV</button>
+      </div>
+      <div class="calc-card">
+        <h4>📈 结果</h4>
+        <div id="evResult">
+          <div class="calc-result" id="evCallResult">
+            <div class="result-label">跟注 EV</div>
+            <div class="result-value">—</div>
+          </div>
+          <div class="calc-result" id="evBluffResult" style="margin-top:8px;">
+            <div class="result-label">诈唬 EV（按 call 额下注）</div>
+            <div class="result-value">—</div>
+          </div>
+          <div class="calc-result" style="margin-top:8px;">
+            <div class="result-label">最低需要胜率（break-even）</div>
+            <div class="result-value" id="evMinEquity">—</div>
+          </div>
+          <div class="calc-formula">
+            跟注 EV = equity × (pot + call) − call<br>
+            诈唬 EV = foldEq × pot + (1 − foldEq) × (equity × (pot + 2×call) − call)
           </div>
         </div>
       </div>
@@ -6104,6 +6210,8 @@ document.querySelectorAll('.tools-tabs button').forEach(btn => {
     if (target === 'outs') updateOuts();
     if (target === 'position') renderPositionTable();
     if (target === 'pushfold') renderPushFold();
+    if (target === 'equity') runEquityCalc();
+    if (target === 'ev') runEVCalc();
   });
 });
 
@@ -8838,6 +8946,298 @@ document.getElementById('autoBattleResetBtn').addEventListener('click', () => {
 document.getElementById('abStartBtn').addEventListener('click', abStartAutoBattle);
 document.getElementById('abAgainBtn').addEventListener('click', abStartAutoBattle);
 document.getElementById('abStopBtn').addEventListener('click', abStopAutoBattle);
+
+/* ============================================================
+   Tool: Equity vs Range (Monte Carlo)
+   ============================================================ */
+
+/**
+ * 把单张牌的字符串（"Ah" / "Kd"）标准化成 "rank + suitName" 形式
+ * @param {string} s
+ * @returns {string|null}
+ */
+function _normalizeCard(s) {
+  if (!s || s.length < 2) return null;
+  // 处理 "10c" / "10h" 等带 10 的形式
+  let r, st;
+  if (s.length >= 3 && s[0] === '1' && s[1] === '0') {
+    r = 'T';
+    st = s[2].toLowerCase();
+  } else {
+    r = s[0].toUpperCase();
+    st = s[1].toLowerCase();
+  }
+  if (!SUITS.some(x => x.name === st)) return null;
+  return r + st;
+}
+
+/**
+ * 把一张手牌（如 "AKs"/"AA"/"AKo"）展开成所有 2 张牌组合的列表
+ * - 对子: 6 个组合（如 AA → c(4,2) = 6）
+ * - 同花: 4 个组合（每个花色一张大牌 + 一张小牌）
+ * - 异花: 12 个组合
+ * @param {string} handKey 标准手牌 key
+ * @returns {string[][]} 每个元素是 [card1, card2]（标准化 "Ah" 形式）
+ */
+function _handToCombos(handKey) {
+  const combos = [];
+  const r1 = handKey[0];
+  if (handKey.length === 2) {
+    // 对子：c(4,2)
+    for (let i = 0; i < 4; i++) {
+      for (let j = i + 1; j < 4; j++) {
+        combos.push([r1 + SUITS[i].name, r1 + SUITS[j].name]);
+      }
+    }
+    return combos;
+  }
+  const r2 = handKey[1];
+  const suf = handKey[2];
+  if (suf === 's') {
+    // 同花：4 个花色各 1
+    for (let i = 0; i < 4; i++) combos.push([r1 + SUITS[i].name, r2 + SUITS[i].name]);
+  } else {
+    // 异花：A 4 个花色 × K 4 个花色（除同花）= 12
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        if (i === j) continue;
+        combos.push([r1 + SUITS[i].name, r2 + SUITS[j].name]);
+      }
+    }
+  }
+  return combos;
+}
+
+/**
+ * 把"我的范围"或"对手范围"字符串展开为带权重的 combo 列表
+ * 权重 = combo 数 × 该手牌的百分比
+ * 移除被 blockedCards 阻塞的组合（blockedCards: ['Ah', 'Kd'] 等）
+ * @param {string} rangeStr
+ * @param {string[]} blockedCards 标准化的牌字符串数组
+ * @returns {Array<{cards:string[], weight:number}>}
+ */
+function _rangeToWeightedCombos(rangeStr, blockedCards) {
+  const map = parseRangeString(rangeStr);
+  const blocked = new Set(blockedCards || []);
+  const result = [];
+  for (const [handKey, pct] of map) {
+    const combos = _handToCombos(handKey);
+    const weightPerCombo = pct / 100;
+    for (const cards of combos) {
+      if (blocked.has(cards[0]) || blocked.has(cards[1])) continue;
+      result.push({ cards, weight: weightPerCombo });
+    }
+  }
+  return result;
+}
+
+/**
+ * Fisher-Yates 洗牌
+ */
+function _shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
+ * 从一副标准 52 张牌中随机抽 n 张，抽后从池中移除
+ * @param {string[]} pool 输入池（会被修改）
+ * @param {number} n
+ * @returns {string[]}
+ */
+function _drawCards(pool, n) {
+  const drawn = [];
+  for (let i = 0; i < n && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    drawn.push(pool[idx]);
+    pool.splice(idx, 1);
+  }
+  return drawn;
+}
+
+/**
+ * 用现有 abEval5/abBestHandFrom7 计算 hero vs villain 胜率（蒙特卡洛）
+ * @param {object} opts
+ * @param {string} opts.hero 手牌/范围字符串
+ * @param {string} opts.villain 对手范围字符串
+ * @param {string[]} [opts.board=[]] 公共牌 0-5 张
+ * @param {number} [opts.samples=500]
+ * @returns {{equity:number, wins:number, ties:number, losses:number, total:number}}
+ */
+/**
+ * 按 weight 字段加权随机抽取一个元素（用于范围百分比混合采样）
+ * 假设 weight ≥ 0；若全 0 返回 undefined
+ * @param {Array<{weight:number}>} arr
+ * @returns {*}
+ */
+function _weightedPick(arr) {
+  let total = 0;
+  for (const x of arr) total += (x.weight || 0);
+  if (total <= 0) return undefined;
+  let r = Math.random() * total;
+  for (const x of arr) {
+    r -= (x.weight || 0);
+    if (r <= 0) return x;
+  }
+  return arr[arr.length - 1];
+}
+
+function _calcEquityMonteCarlo({ hero, villain, board = [], samples = 500 }) {
+  // 1) 规范化公共牌并扩展双方范围
+  const normalizedBoard = board.map(_normalizeCard).filter(Boolean);
+  const blockedFromBoard = new Set(normalizedBoard);
+  const heroCombos = _rangeToWeightedCombos(hero, [...blockedFromBoard]);
+  const villainCombos = _rangeToWeightedCombos(villain, [...blockedFromBoard]);
+
+  if (heroCombos.length === 0 || villainCombos.length === 0) {
+    return { equity: 0, wins: 0, ties: 0, losses: 0, total: 0, error: '无效范围或无可用组合' };
+  }
+
+  // 2) 构建 52 张牌池（扣除公共牌；hero/villain 的 combo 不预先占用，靠加权抽样+冲突跳过处理）
+  const used = new Set([...blockedFromBoard]);
+  const deck = [];
+  for (const r of RANKS) {
+    for (const s of SUITS) {
+      const card = r + s.name;
+      if (!used.has(card)) deck.push(card);
+    }
+  }
+
+  const cardsNeeded = 5 - normalizedBoard.length;  // 还需要发几张公共牌
+  let wins = 0, ties = 0, losses = 0, total = 0;
+
+  for (let i = 0; i < samples; i++) {
+    const pool = deck.slice();
+    const drawnBoard = _drawCards(pool, cardsNeeded);
+    const fullBoard = normalizedBoard.concat(drawnBoard);
+    // 按权重抽 hero / villain combo（修复混合范围偏置）
+    const hc = _weightedPick(heroCombos);
+    const vc = _weightedPick(villainCombos);
+    if (!hc || !vc) continue;
+    // 防御：若双方牌冲突（极小概率），跳过这次采样
+    const usedCards = new Set([hc.cards[0], hc.cards[1], vc.cards[0], vc.cards[1]]);
+    if (usedCards.size !== 4) continue;
+    const heroBest = abBestHandFrom7(hc.cards, fullBoard);
+    const villBest = abBestHandFrom7(vc.cards, fullBoard);
+    if (!heroBest || !villBest) continue;
+    const pairWeight = hc.weight * vc.weight;
+    total += pairWeight;
+    if (heroBest.score > villBest.score) wins += pairWeight;
+    else if (heroBest.score === villBest.score) ties += pairWeight;
+    else losses += pairWeight;
+  }
+
+  const equity = total > 0 ? (wins + ties * 0.5) / total : 0;
+  return { equity, wins, ties, losses, total };
+}
+
+function runEquityCalc() {
+  const heroStr = (document.getElementById('eqHero').value || '').trim();
+  const villStr = (document.getElementById('eqVillain').value || '').trim();
+  const boardStr = (document.getElementById('eqBoard').value || '').trim();
+  const samples = parseInt(document.getElementById('eqSamples').value, 10) || 500;
+  if (!heroStr || !villStr) {
+    document.getElementById('eqFormula').textContent = '请输入你的手牌和对手范围';
+    return;
+  }
+  // 解析公共牌
+  const boardCards = boardStr ? boardStr.split(/[\s,]+/).map(_normalizeCard).filter(Boolean) : [];
+  if (boardStr && boardCards.length < boardStr.split(/[\s,]+/).filter(Boolean).length) {
+    document.getElementById('eqFormula').textContent = '⚠ 公共牌格式错误';
+    return;
+  }
+  if (boardCards.length > 5) {
+    document.getElementById('eqFormula').textContent = '⚠ 公共牌最多 5 张';
+    return;
+  }
+  const eqResult = document.getElementById('eqEquity');
+  const winsEl = document.getElementById('eqWins');
+  const tiesEl = document.getElementById('eqTies');
+  const lossEl = document.getElementById('eqLosses');
+  const formulaEl = document.getElementById('eqFormula');
+  eqResult.textContent = '...';
+  formulaEl.textContent = '🎲 模拟中...';
+  setTimeout(() => {
+    const result = _calcEquityMonteCarlo({ hero: heroStr, villain: villStr, board: boardCards, samples });
+    if (result.error) {
+      eqResult.textContent = '—';
+      formulaEl.textContent = '⚠ ' + result.error;
+      return;
+    }
+    const equityPct = result.equity * 100;
+    eqResult.textContent = equityPct.toFixed(1) + '%';
+    const winsPct = (result.wins / result.total * 100).toFixed(1);
+    const tiesPct = (result.ties / result.total * 100).toFixed(1);
+    const lossPct = (result.losses / result.total * 100).toFixed(1);
+    winsEl.textContent = winsPct + '%';
+    tiesEl.textContent = tiesPct + '%';
+    lossEl.textContent = lossPct + '%';
+    formulaEl.textContent = `采样 ${samples} 次 · 公共牌 ${boardCards.length} 张${boardCards.length < 5 ? '（自动补足至 5 张）' : ''}· 双方范围均为混合百分比`;
+  }, 50);
+}
+
+document.getElementById('eqRun').addEventListener('click', runEquityCalc);
+document.getElementById('eqHero').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEquityCalc(); });
+document.getElementById('eqVillain').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEquityCalc(); });
+
+/* ============================================================
+   Tool: EV Decision (pot odds + bluff frequency)
+   ============================================================ */
+
+/**
+ * 给定场景计算 EV 系列指标
+ * @param {number} pot 当前底池 (BB)
+ * @param {number} call 跟注额 / 下注额 (BB)
+ * @param {number} equityPct 我的胜率 (0-100)
+ * @param {number} foldEqPct 对手弃牌感 (0-100)
+ * @returns {object} { callEV, bluffEV, minEquityPct, callPositive, bluffPositive }
+ */
+function _calcDecisionEV(pot, call, equityPct, foldEqPct) {
+  const e = equityPct / 100;
+  const fE = foldEqPct / 100;
+  // 跟注 EV：胜时拿到 pot + call（包含对手的 call），败时失去 call
+  //   = e × (pot + call) − (1 − e) × call = e × pot + e × call − call + e × call = e × (pot + 2×call) − call
+  const callEV = e * (pot + call) - (1 - e) * call;
+  // 诈唬 EV：下注 call 额。对手 fold 概率 fE，得 pot；call 概率 (1 − fE)，
+  //   跟注后胜率 e，胜时拿到 pot + 2×call，败时输 call
+  const bluffEV = fE * pot + (1 - fE) * (e * (pot + 2 * call) - call);
+  // 最低 break-even equity（不诈唬）：call / (pot + call)
+  const minEquityPct = call / (pot + call) * 100;
+  return {
+    callEV,
+    bluffEV,
+    minEquityPct,
+    callPositive: callEV > 0,
+    bluffPositive: bluffEV > 0,
+  };
+}
+
+function runEVCalc() {
+  const pot = parseFloat(document.getElementById('evPot').value) || 0;
+  const call = parseFloat(document.getElementById('evCall').value) || 0;
+  const equityPct = parseFloat(document.getElementById('evEquity').value) || 0;
+  const foldEqPct = parseFloat(document.getElementById('evFoldEq').value) || 0;
+  const result = _calcDecisionEV(pot, call, equityPct, foldEqPct);
+  const callRes = document.getElementById('evCallResult');
+  const bluffRes = document.getElementById('evBluffResult');
+  const minEqEl = document.getElementById('evMinEquity');
+  callRes.className = 'calc-result ' + (result.callPositive ? 'good' : 'bad');
+  callRes.querySelector('.result-value').textContent =
+    (result.callEV >= 0 ? '+' : '') + result.callEV.toFixed(2) + ' BB';
+  callRes.querySelector('.result-value').style.color = result.callPositive ? '#00b894' : '#d63031';
+  bluffRes.className = 'calc-result ' + (result.bluffPositive ? 'good' : 'bad');
+  bluffRes.querySelector('.result-value').textContent =
+    (result.bluffEV >= 0 ? '+' : '') + result.bluffEV.toFixed(2) + ' BB';
+  bluffRes.querySelector('.result-value').style.color = result.bluffPositive ? '#00b894' : '#d63031';
+  minEqEl.parentElement.className = 'calc-result ' + (equityPct >= result.minEquityPct ? 'good' : 'bad');
+  minEqEl.textContent = result.minEquityPct.toFixed(1) + '%';
+}
+
+document.getElementById('evRun').addEventListener('click', runEVCalc);
+document.getElementById('evFoldEq').addEventListener('keydown', (e) => { if (e.key === 'Enter') runEVCalc(); });
 </script>
 
 </body>
