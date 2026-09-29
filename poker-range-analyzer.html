@@ -3250,6 +3250,12 @@ function _serializeRangeToString(range) {
   return entries.join(', ');
 }
 
+/**
+ * 把单个位置的预设字符串写入 localStorage（覆盖现有项）
+ * @param {string} pos 位置 key
+ * @param {string} rangeStr 预设字符串
+ * @returns {boolean} 写入成功返回 true（localStorage 不可用返回 false）
+ */
 function _savePresetToLS(pos, rangeStr) {
   const saved = _loadSavedPresets();
   saved[pos] = rangeStr;
@@ -3261,6 +3267,10 @@ function _savePresetToLS(pos, rangeStr) {
   }
 }
 
+/**
+ * 清空 localStorage 里的所有自定义预设
+ * @returns {boolean} 成功返回 true
+ */
 function _clearAllSavedPresets() {
   try { localStorage.removeItem(LS_PRESETS_KEY); return true; } catch (e) { return false; }
 }
