@@ -402,8 +402,24 @@
     background: rgba(116, 185, 255, 0.32);
     transition: background 0.25s ease-out;
   }
-  /* Compact view: hide fold cells within rows so removed hands fully disappear */
-  .breakdown .compact td.fold { display: none; }
+  /* Compact view: 不再用 display:none 隐藏单个 fold 单元格（会破坏表格对齐），
+     而是只做行级过滤（renderBreakdown 里跳过 3 列都是 fold 的行）；
+     fold 单元格保留可见但用更弱的样式表示"不在范围" */
+  .breakdown .compact td.fold {
+    opacity: 0.35;
+    background: rgba(255, 255, 255, 0.6);
+    color: #636e72;
+  }
+  .breakdown .compact td.fold.in-range {
+    opacity: 0.35;  /* 保留 in-range 类但不再强调 */
+  }
+  /* 紧凑模式：行高更紧，整体向上收 */
+  .breakdown .compact tr td { padding: 2px 4px; font-size: 11px; }
+  .breakdown .compact tr th { padding: 3px 4px; font-size: 10px; }
+  .breakdown .compact .total-count-cell { font-size: 10px; }
+  .breakdown .compact .use-cell { padding: 1px 2px; }
+  /* 紧凑模式：手牌列字号略缩小 */
+  .breakdown .compact td.in-range .hand-name { font-size: 12px; }
 
   /* ===== Right: board & stats ===== */
   .right-col { display: flex; flex-direction: column; gap: 8px; }
@@ -3367,7 +3383,8 @@ function buildBreakdown() {
 
 /**
  * 把 buildBreakdown 的结果渲染成 breakdown 表的 DOM（tbody + 合计行）
- * - compact 模式下隐藏三列都是 fold 的行
+ * - compact 模式下跳过 3 列都是 fold 的行（行级过滤）
+ * - 保留的行中：fold 部分用 opacity:0.35 弱化（CSS），但仍占位，不破坏列对齐
  * - 每行 12 个 td：手牌 / 组合数 / 总组合数 / 使用勾选 × 三类
  * - 最后追加一行按类汇总的合计行
  */
@@ -3384,7 +3401,7 @@ function renderBreakdown() {
 
   for (let i = 0; i < displayLen; i++) {
     const p = bd.pairs[i], s = bd.suiteds[i], o = bd.offs[i];
-    // Compact mode: skip rows where all three columns are fold (or out of bounds)
+    // Compact mode: 行级过滤 — 3 列都是 fold 则整行跳过
     if (compact && isFold(p) && isFold(s) && isFold(o)) continue;
     const tr = document.createElement('tr');
     tr.appendChild(makeHandTd(p));
