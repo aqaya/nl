@@ -5507,14 +5507,16 @@ const NL_PATTERNS = {
  * 规则化"自然语言 → 牌局三元组"解析器
  * 顺序：先匹配 gameType → 再 position → 再 situation，全部按最长 key 优先
  * 短英文 key 用单词边界正则，避免 "MP3" 这种误匹配
+ * 任何字段没识别到时返回 null（调用方应保留用户在 UI 上的选择，不要默认成 BTN/open）
  * @param {string} text 用户输入的描述
- * @returns {{gameType:string, position:string, situation:string}} 解析出的三元组
+ * @returns {{gameType:(string|null), position:(string|null), situation:(string|null)}} 解析出的三元组
  */
 function parseNaturalLanguage(text) {
   const lower = text.toLowerCase().trim();
-  let gameType = '6max-100bb';  // default
-  let position = 'btn';        // default
-  let situation = 'open';      // default
+  // 默认 null：表示"输入里没识别到"，调用方应保留用户在 UI 上的选择
+  let gameType = null;
+  let position = null;
+  let situation = null;
 
   // Detect game type (longest patterns first)
   const gameKeys = Object.keys(NL_PATTERNS).filter(k =>
@@ -5573,11 +5575,11 @@ document.getElementById('nlAnalyzeBtn').addEventListener('click', async () => {
   const apiKey = document.getElementById('apiKeyInput').value.trim();
   const model = document.getElementById('apiModelInput').value.trim();
 
-  // Update selectors from parsed input first
+  // Update selectors from parsed input — 仅当解析器识别到时才覆盖，保留用户原有选择
   const parsed = parseNaturalLanguage(input);
-  document.getElementById('gameTypeSel').value = parsed.gameType;
-  document.getElementById('positionSel').value = parsed.position;
-  document.getElementById('situationSel').value = parsed.situation;
+  if (parsed.gameType)  document.getElementById('gameTypeSel').value  = parsed.gameType;
+  if (parsed.position)  document.getElementById('positionSel').value  = parsed.position;
+  if (parsed.situation) document.getElementById('situationSel').value = parsed.situation;
 
   if (apiKey) {
     // Use real LLM API
