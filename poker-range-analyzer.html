@@ -2001,7 +2001,7 @@
       <div class="section-header">使用中组合统计</div>
       <table class="stats-table">
         <tr><th title="勾选手牌的有效组合数之和（考虑百分比 / 覆盖后的实际计数）。混合策略（如 raise:50）按比例计入。">我修改选中的组合数!</th><td><strong id="usedCount" style="color:#00b894; font-size:14px;">0</strong></td></tr>
-        <tr><th title="勾选手牌的理论最大组合数之和（对子 = 6、同花 = 4、异花 = 12，**不考虑**百分比 / 覆盖）。">可能组合数!</th><td id="totalCount">0</td></tr>
+        <tr><th title="范围内**所有**手牌（不限是否勾选）扣公共牌阻塞后的可用组合数之和。对子 = 6、同花 = 4、异花 = 12 起步。">可能组合数!</th><td id="totalCount">0</td></tr>
         <tr><th title="使用占比 = 我修改选中的组合数 / 可能组合数。反映勾选手牌中理论最大 vs 实际计入的比例。">使用占比!</th><td><strong id="usedPct" style="color:#74b9ff; font-size:14px;">-</strong></td></tr>
         <tr><th title="已使用的对子 = 我修改 / 可能 = 勾选对子的 effectiveCount 之和 / 理论 6×对子数 之和。">对子使用 / 可能!</th><td id="usedPairs">-</td></tr>
         <tr><th title="已使用的同花 = 我修改 / 可能 = 勾选同花的 effectiveCount 之和 / 理论 4×同花数 之和。">同花使用 / 可能!</th><td id="usedSuiteds">-</td></tr>
@@ -3659,32 +3659,46 @@ function fmtCount(n) {
 }
 
 /**
+ * 把一组手牌数组里"在范围内（action ≠ fold）"的**可用组合数**累加
+ * （availableCombosForHand 已扣公共牌阻塞）。用于 side panel "可能组合数"
+ * 的分母：所有选中手牌扣阻塞后的可用池总和，与是否勾选"使用"无关。
+ * @param {Array<{key:string, action:string, count:number}>} arr
+ * @param {string[]} boardCards 公共牌字符串数组
+ * @returns {number}
+ */
+function sumAvailableInRange(arr, boardCards) {
+  return arr.filter(x => x.action && x.action !== 'fold')
+            .reduce((s, x) => s + availableCombosForHand(x.key, boardCards), 0);
+}
+
+/**
  * 重算并写入 breakdown 表上方的"使用统计"区域：
- * - 我修改选中的组合数 = 勾选手牌的 effectiveCount 之和（考虑百分比/覆盖）
- * - 可能组合数        = 勾选手牌的理论最大 item.count 之和（不考虑百分比/覆盖）
+ * - 我修改选中的组合数 = 勾选手牌的 effectiveCount 之和（考虑百分比/覆盖 + 阻塞钳制）
+ * - 可能组合数        = **范围内所有手牌**扣阻塞后的可用组合数之和（不要求勾选）
  * - 使用占比          = 我修改选中的总和 / 可能组合数总和
- * - 对子/同花/异花 各自的 已用 vs 可能（均仅看勾选手牌）
+ * - 对子/同花/异花 各自的 已用 vs 可能（分子仅勾选；分母范围内全部）
  */
 function updateUseStats() {
   const bd = buildBreakdown();
+  const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
 
-  // "我修改选中的" = effectiveCount 之和（仅勾选手牌）
-  // "可能组合数"   = item.count 之和（仅勾选手牌，未折算）
+  // 分子：勾选手牌的 effectiveCount 之和（考虑百分比/覆盖，且已 clamp 到 available）
   const myModified = sumEffectiveChecked(bd.pairs)
                    + sumEffectiveChecked(bd.suiteds)
                    + sumEffectiveChecked(bd.offs);
-  const possible   = sumTheoreticalChecked(bd.pairs)
-                   + sumTheoreticalChecked(bd.suiteds)
-                   + sumTheoreticalChecked(bd.offs);
+  // 分母：范围内所有手牌扣阻塞后的可用组合数之和（不要求勾选）
+  const possible   = sumAvailableInRange(bd.pairs, boardCards)
+                   + sumAvailableInRange(bd.suiteds, boardCards)
+                   + sumAvailableInRange(bd.offs, boardCards);
   const pct = possible ? Math.round(100 * myModified / possible) : 0;
 
-  // Per-type breakdown（均仅看勾选手牌）
+  // Per-type breakdown
   const usedPairs = sumEffectiveChecked(bd.pairs);
-  const posPairs  = sumTheoreticalChecked(bd.pairs);
+  const posPairs  = sumAvailableInRange(bd.pairs, boardCards);
   const usedSu    = sumEffectiveChecked(bd.suiteds);
-  const posSu     = sumTheoreticalChecked(bd.suiteds);
+  const posSu     = sumAvailableInRange(bd.suiteds, boardCards);
   const usedOff   = sumEffectiveChecked(bd.offs);
-  const posOff    = sumTheoreticalChecked(bd.offs);
+  const posOff    = sumAvailableInRange(bd.offs, boardCards);
 
   const myEl     = document.getElementById('usedCount');
   const posEl    = document.getElementById('totalCount');
