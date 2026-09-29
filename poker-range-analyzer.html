@@ -2001,7 +2001,7 @@
       <div class="section-header">使用中组合统计</div>
       <table class="stats-table">
         <tr><th title="勾选手牌的有效组合数之和（考虑百分比 / 覆盖后的实际计数）。混合策略（如 raise:50）按比例计入。">我修改选中的组合数!</th><td><strong id="usedCount" style="color:#00b894; font-size:14px;">0</strong></td></tr>
-        <tr><th title="范围内**所有**手牌（不限是否勾选）扣公共牌阻塞后的可用组合数之和。对子 = 6、同花 = 4、异花 = 12 起步。">可能组合数!</th><td id="totalCount">0</td></tr>
+        <tr><th title="范围内**所有**手牌（不限是否勾选）的总组合数之和 = Σ (理论 × open频率 - 阻塞扣减, ≥ 0)。">可能组合数!</th><td id="totalCount">0</td></tr>
         <tr><th title="使用占比 = 我修改选中的组合数 / 可能组合数。反映勾选手牌中理论最大 vs 实际计入的比例。">使用占比!</th><td><strong id="usedPct" style="color:#74b9ff; font-size:14px;">-</strong></td></tr>
         <tr><th title="已使用的对子 = 我修改 / 可能 = 勾选对子的 effectiveCount 之和 / 理论 6×对子数 之和。">对子使用 / 可能!</th><td id="usedPairs">-</td></tr>
         <tr><th title="已使用的同花 = 我修改 / 可能 = 勾选同花的 effectiveCount 之和 / 理论 4×同花数 之和。">同花使用 / 可能!</th><td id="usedSuiteds">-</td></tr>
@@ -3405,20 +3405,21 @@ function renderBreakdown() {
   const trow = document.createElement('tr');
   trow.style.fontWeight = 'bold';
   trow.style.background = '#f1f3f5';
-  // 总组合数小计：理论 × open 频率（不扣阻塞，不应用 override）
-  const sumByOpenFreq = arr => arr.reduce((s, x) => s + theoreticalByOpenFreq(x), 0);
+  // 总组合数小计：(理论 × open频率) - 阻塞扣减，钳制到 ≥ 0
+  const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
+  const sumTotal = arr => arr.reduce((s, x) => s + totalCombosForCell(x, boardCards), 0);
   trow.innerHTML = `
     <td>${bd.pairs.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.pairs))}</td>
-    <td>${fmtCount(sumByOpenFreq(bd.pairs))}</td>
+    <td>${fmtCount(sumTotal(bd.pairs))}</td>
     <td></td>
     <td>${bd.suiteds.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.suiteds))}</td>
-    <td>${fmtCount(sumByOpenFreq(bd.suiteds))}</td>
+    <td>${fmtCount(sumTotal(bd.suiteds))}</td>
     <td></td>
     <td>${bd.offs.filter(x=>x.action && x.action!=='fold').length} 种</td>
     <td>${fmtCount(sumCombos(bd.offs))}</td>
-    <td>${fmtCount(sumByOpenFreq(bd.offs))}</td>
+    <td>${fmtCount(sumTotal(bd.offs))}</td>
     <td></td>
   `;
   tbody.appendChild(trow);
@@ -3514,24 +3515,29 @@ function availableCombosForHand(key, boardCards) {
 }
 
 /**
- * 计算某手牌的"理论 × open 频率"（按用户的 open 频率打折后的最大期望组合数）
- * - 取 action 的百分比（raise:50 → 50%），无百分比时视为 100%
- * - 不应用 rangeOverrides（override 只影响实际使用，不影响理论最大）
- * - 不扣除阻塞（blocker 走"使用"列的钳制）
+ * 计算某手牌的"总组合数"（按 P2 模型）：
+ *   总 = (理论 × open 频率) - 阻塞扣减，钳制到 ≥ 0
+ * - 先用 action 的百分比把理论打折（raise:50 → 50%），无百分比视为 100%
+ * - 然后扣除被公共牌阻塞的组合数（按理论规模计，4 - available）
+ * - 不应用 rangeOverrides（override 只影响实际使用）
+ * - 钳制到 ≥ 0 避免重阻塞 / 低百分比下出现负数
+ * - "使用组合数"列同时钳制到 ≤ 总，确保 使用 ≤ 总 恒成立
  * @param {{key:string, action:string, count:number}} item
- * @returns {number} 打折后的最大期望组合数
+ * @param {string[]} boardCards 公共牌字符串数组
+ * @returns {number}
  */
-function theoreticalByOpenFreq(item) {
+function totalCombosForCell(item, boardCards) {
   if (!item) return 0;
   const pct = getActionPercent(item.action);
-  return pct !== null && pct < 100 ? item.count * pct / 100 : item.count;
+  const baseTotal = pct !== null && pct < 100 ? item.count * pct / 100 : item.count;
+  const available = availableCombosForHand(item.key, boardCards);
+  const blocked = item.count - available;
+  return Math.max(0, baseTotal - blocked);
 }
 
 /**
- * 为 breakdown 表里某行生成"总组合数" td（理论 × open 频率）
- * - 对子=6、同花=4、异花=12 起步，按 action 的百分比（raise:50 → 50%）打折
- * - 不应用阻塞（blocker 钳制走"使用组合数"列的 min）
- * - 不应用 rangeOverrides（override 只影响实际使用）
+ * 为 breakdown 表里某行生成"总组合数" td
+ * 总 = (理论 × open 频率) - 阻塞扣减（≥ 0）；使用 ≤ 总（由 effectiveCount 钳制）
  * @param {{key:string, action:string, count:number}|null} item 单个手牌项；null 时返回空 td
  * @returns {HTMLTableCellElement} td 节点
  */
@@ -3540,7 +3546,8 @@ function makeTotalCountTd(item) {
   td.classList.add('total-count-cell');
   if (!item) return td;
   td.dataset.hand = item.key;
-  td.textContent = theoreticalByOpenFreq(item);
+  const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
+  td.textContent = totalCombosForCell(item, boardCards);
   return td;
 }
 
@@ -3642,11 +3649,11 @@ function applyUseDragToCell(key, sourceChecked) {
 }
 
 /**
- * 计算某个手牌在当前规则下的"有效组合数"
+ * 计算某个手牌在当前规则下的"有效组合数"（"使用组合数"列的值）
  * - 优先用 state.rangeOverrides 里的手动值（如 blocker 扣除后）
  * - 否则用 item.count（理论组合数）
  * - 若 action 带百分比（如 raise:60），再乘以 pct/100
- * - 最后钳制 ≤ availableCombosForHand（确保使用组合数不超总组合数）
+ * - 最后钳制 ≤ totalCombosForHand（确保 使用 ≤ 总 恒成立）
  * @param {{key:string, action:string, count:number}} item 手牌项
  * @returns {number} 实际计数的组合数
  */
@@ -3656,10 +3663,10 @@ function effectiveCount(item) {
     : item.count;
   const pct = getActionPercent(item.action);
   const raw = pct !== null ? base * pct / 100 : base;
-  // 阻塞钳制：使用组合数不能超过"已扣阻塞"的可用组合数
+  // 钳制：使用组合数不能超过 总组合数（已扣阻塞 + 打折）
   const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
-  const available = availableCombosForHand(item.key, boardCards);
-  return Math.min(raw, available);
+  const total = totalCombosForCell(item, boardCards);
+  return Math.min(raw, total);
 }
 
 /**
@@ -3672,46 +3679,46 @@ function fmtCount(n) {
 }
 
 /**
- * 把一组手牌数组里"在范围内（action ≠ fold）"的**可用组合数**累加
- * （availableCombosForHand 已扣公共牌阻塞）。用于 side panel "可能组合数"
- * 的分母：所有选中手牌扣阻塞后的可用池总和，与是否勾选"使用"无关。
+ * 把一组手牌数组里"在范围内（action ≠ fold）"的**总组合数**累加
+ * （totalCombosForCell：理论 × open频率 - 阻塞扣减，≥ 0）。用于 side panel
+ * "可能组合数"的分母：所有范围内手牌的"打折扣阻后"总和，与勾选无关。
  * @param {Array<{key:string, action:string, count:number}>} arr
- * @param {string[]} boardCards 公共牌字符串数组
+ * @param {string[]} boardCards
  * @returns {number}
  */
-function sumAvailableInRange(arr, boardCards) {
+function sumTotalInRange(arr, boardCards) {
   return arr.filter(x => x.action && x.action !== 'fold')
-            .reduce((s, x) => s + availableCombosForHand(x.key, boardCards), 0);
+            .reduce((s, x) => s + totalCombosForCell(x, boardCards), 0);
 }
 
 /**
  * 重算并写入 breakdown 表上方的"使用统计"区域：
- * - 我修改选中的组合数 = 勾选手牌的 effectiveCount 之和（考虑百分比/覆盖 + 阻塞钳制）
- * - 可能组合数        = **范围内所有手牌**扣阻塞后的可用组合数之和（不要求勾选）
+ * - 我修改选中的组合数 = 勾选手牌的 effectiveCount 之和（已钳制到 ≤ 总）
+ * - 可能组合数        = **范围内所有手牌**的总组合数之和（不要求勾选）
  * - 使用占比          = 我修改选中的总和 / 可能组合数总和
- * - 对子/同花/异花 各自的 已用 vs 可能（分子仅勾选；分母范围内全部）
+ * - 对子/同花/异花 各自的 已用 vs 可能
  */
 function updateUseStats() {
   const bd = buildBreakdown();
   const boardCards = (state.board || []).filter(c => c).map(c => c.rank + c.suit);
 
-  // 分子：勾选手牌的 effectiveCount 之和（考虑百分比/覆盖，且已 clamp 到 available）
+  // 分子：勾选手牌的 effectiveCount 之和
   const myModified = sumEffectiveChecked(bd.pairs)
                    + sumEffectiveChecked(bd.suiteds)
                    + sumEffectiveChecked(bd.offs);
-  // 分母：范围内所有手牌扣阻塞后的可用组合数之和（不要求勾选）
-  const possible   = sumAvailableInRange(bd.pairs, boardCards)
-                   + sumAvailableInRange(bd.suiteds, boardCards)
-                   + sumAvailableInRange(bd.offs, boardCards);
+  // 分母：范围内所有手牌的总组合数之和（已扣阻 + 已打折）
+  const possible   = sumTotalInRange(bd.pairs, boardCards)
+                   + sumTotalInRange(bd.suiteds, boardCards)
+                   + sumTotalInRange(bd.offs, boardCards);
   const pct = possible ? Math.round(100 * myModified / possible) : 0;
 
   // Per-type breakdown
   const usedPairs = sumEffectiveChecked(bd.pairs);
-  const posPairs  = sumAvailableInRange(bd.pairs, boardCards);
+  const posPairs  = sumTotalInRange(bd.pairs, boardCards);
   const usedSu    = sumEffectiveChecked(bd.suiteds);
-  const posSu     = sumAvailableInRange(bd.suiteds, boardCards);
+  const posSu     = sumTotalInRange(bd.suiteds, boardCards);
   const usedOff   = sumEffectiveChecked(bd.offs);
-  const posOff    = sumAvailableInRange(bd.offs, boardCards);
+  const posOff    = sumTotalInRange(bd.offs, boardCards);
 
   const myEl     = document.getElementById('usedCount');
   const posEl    = document.getElementById('totalCount');
