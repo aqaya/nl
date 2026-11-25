@@ -845,6 +845,26 @@
     border-radius: 3px;
     font-size: 13px;
   }
+  .rand-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin: -4px 0 8px 98px;
+  }
+  .rand-btn {
+    font-size: 11px;
+    padding: 3px 8px;
+    border: 1px solid #dfe6e9;
+    border-radius: 3px;
+    background: #fff;
+    color: #636e72;
+    cursor: pointer;
+    font-family: inherit;
+    line-height: 1.4;
+  }
+  .rand-btn:hover { background: #74b9ff; border-color: #74b9ff; color: #fff; }
+  .rand-btn:active { transform: translateY(1px); }
+  .rand-btn.flash { animation: syncFlash 0.6s ease-out; }
   .calc-result {
     margin-top: 10px;
     padding: 10px;
@@ -2575,13 +2595,25 @@
           <label>你的手牌/范围:</label>
           <input type="text" id="eqHero" value="AA, AKs, AKo" placeholder="如 AA 或 22+, ATs+, KJs+" />
         </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="hand" data-target="eqHero" title="随机生成 2 张具体底牌（如 As Kd）">🎲 随机底牌</button>
+          <button class="rand-btn" data-rand="range" data-target="eqHero" title="随机生成 1-2 个手牌型（如 AKs, Q7s）">🎲 随机手牌型</button>
+        </div>
         <div class="calc-input-row">
           <label>对手范围:</label>
           <input type="text" id="eqVillain" value="22+, A2s+, K9s+, QTs+, JTs, ATo+, KQo" placeholder="对手范围字符串" />
         </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="range" data-target="eqVillain" title="随机生成 1-2 个手牌型（如 AKs, Q7s）">🎲 随机范围</button>
+        </div>
         <div class="calc-input-row">
           <label>公共牌 (可选):</label>
           <input type="text" id="eqBoard" placeholder="如 Ah Kd 7s（0-5 张，留空=模拟到河牌）" />
+        </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="board" data-target="eqBoard" data-count="3" data-exclude="eqHero" data-avoid="eqHero,eqVillain" title="随机生成 3 张公共牌（翻牌）">🎲 3张</button>
+          <button class="rand-btn" data-rand="board" data-target="eqBoard" data-count="4" data-exclude="eqHero" data-avoid="eqHero,eqVillain" title="随机生成 4 张公共牌（转牌）">🎲 4张</button>
+          <button class="rand-btn" data-rand="board" data-target="eqBoard" data-count="5" data-exclude="eqHero" data-avoid="eqHero,eqVillain" title="随机生成 5 张公共牌（河牌）">🎲 5张</button>
         </div>
         <div class="calc-input-row">
           <label>采样数:</label>
@@ -2679,8 +2711,13 @@
           <div class="board-empty">?</div><div class="board-empty">?</div>
         </div>
         <div class="calc-input-row">
-          <label>公共牌 (空格分隔):</label>
-          <input type="text" id="boardInput" placeholder="如 Ah Kd 7s 或 As Kd Qd Jd Tc" />
+          <label>公共牌:</label>
+          <input type="text" id="boardInput" placeholder="如 Ah Kd 7s 或 As Kd Qd Jd Tc（空格分隔）" />
+        </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="board" data-target="boardInput" data-count="3" title="随机生成 3 张公共牌（翻牌）">🎲 3张</button>
+          <button class="rand-btn" data-rand="board" data-target="boardInput" data-count="4" title="随机生成 4 张公共牌（转牌）">🎲 4张</button>
+          <button class="rand-btn" data-rand="board" data-target="boardInput" data-count="5" title="随机生成 5 张公共牌（河牌）">🎲 5张</button>
         </div>
         <div class="calc-input-row">
           <label>谁先行动 (preflop 进攻方):</label>
@@ -2731,9 +2768,15 @@
           <label>范围 A (蓝):</label>
           <input type="text" id="rvHero" value="22+, A2s+, K9s+, QTs+, JTs, ATo+, KQo" />
         </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="range" data-target="rvHero" title="随机生成 1-2 个手牌型（如 AKs, Q7s）">🎲 随机范围</button>
+        </div>
         <div class="calc-input-row">
           <label>范围 B (红):</label>
           <input type="text" id="rvVillain" value="AA, KK, QQ, AKs, AKo, AQs" />
+        </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="range" data-target="rvVillain" title="随机生成 1-2 个手牌型（如 AKs, Q7s）">🎲 随机范围</button>
         </div>
         <button class="calc-btn" id="rvRun" style="width:100%; margin-top:8px; padding:10px; background:#74b9ff; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">🎨 生成对比图</button>
       </div>
@@ -2777,13 +2820,24 @@
           <label>你的范围:</label>
           <input type="text" id="edHero" value="22+, ATs+, KQs, AJo+, KQo" />
         </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="range" data-target="edHero" title="随机生成 1-2 个手牌型（如 AKs, Q7s）">🎲 随机范围</button>
+        </div>
         <div class="calc-input-row">
           <label>对手范围:</label>
           <input type="text" id="edVillain" value="AA, KK, QQ, AKs, AKo, AQs, AJs, KQs" />
         </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="range" data-target="edVillain" title="随机生成 1-2 个手牌型（如 AKs, Q7s）">🎲 随机范围</button>
+        </div>
         <div class="calc-input-row">
           <label>公共牌 (可选):</label>
           <input type="text" id="edBoard" placeholder="如 Ah Kd 7s" />
+        </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="board" data-target="edBoard" data-count="3" data-avoid="edHero,edVillain" title="随机生成 3 张公共牌（翻牌）">🎲 3张</button>
+          <button class="rand-btn" data-rand="board" data-target="edBoard" data-count="4" data-avoid="edHero,edVillain" title="随机生成 4 张公共牌（转牌）">🎲 4张</button>
+          <button class="rand-btn" data-rand="board" data-target="edBoard" data-count="5" data-avoid="edHero,edVillain" title="随机生成 5 张公共牌（河牌）">🎲 5张</button>
         </div>
         <div class="calc-input-row">
           <label>每手牌采样:</label>
@@ -2926,13 +2980,24 @@
           <label>我的底牌:</label>
           <input type="text" id="rpHand" value="As Kd" placeholder="如 As Kd 或 AhKh" />
         </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="hand" data-target="rpHand" data-exclude="rpBoard" title="随机生成 2 张底牌（自动避开公共牌）">🎲 随机底牌</button>
+        </div>
         <div class="calc-input-row">
           <label>公共牌:</label>
           <input type="text" id="rpBoard" placeholder="0-5 张，如 Qh Jd 7c 2s" />
         </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="board" data-target="rpBoard" data-count="3" data-exclude="rpHand" data-avoid="rpVillRange" title="随机生成 3 张公共牌（翻牌）">🎲 3张</button>
+          <button class="rand-btn" data-rand="board" data-target="rpBoard" data-count="4" data-exclude="rpHand" data-avoid="rpVillRange" title="随机生成 4 张公共牌（转牌）">🎲 4张</button>
+          <button class="rand-btn" data-rand="board" data-target="rpBoard" data-count="5" data-exclude="rpHand" data-avoid="rpVillRange" title="随机生成 5 张公共牌（河牌）">🎲 5张</button>
+        </div>
         <div class="calc-input-row">
           <label>对手范围:</label>
           <input type="text" id="rpVillRange" value="AA, KK, QQ, JJ, AKs, AKo, AQs, AQo" />
+        </div>
+        <div class="rand-row">
+          <button class="rand-btn" data-rand="range" data-target="rpVillRange" title="随机生成 1-2 个手牌型（如 AKs, Q7s）">🎲 随机范围</button>
         </div>
         <div class="calc-input-row">
           <label>采样数:</label>
@@ -9445,14 +9510,22 @@ function _handToCombos(handKey) {
  * 把"我的范围"或"对手范围"字符串展开为带权重的 combo 列表
  * 权重 = combo 数 × 该手牌的百分比
  * 移除被 blockedCards 阻塞的组合（blockedCards: ['Ah', 'Kd'] 等）
+ * 也支持显式指定的两张牌（如 "As Kd"），此时视为单一组合
  * @param {string} rangeStr
  * @param {string[]} blockedCards 标准化的牌字符串数组
  * @returns {Array<{cards:string[], weight:number}>}
  */
 function _rangeToWeightedCombos(rangeStr, blockedCards) {
-  const map = parseRangeString(rangeStr);
   const blocked = new Set(blockedCards || []);
   const result = [];
+  const explicit = _parseExplicitCards(rangeStr);
+  if (explicit) {
+    if (!blocked.has(explicit[0]) && !blocked.has(explicit[1])) {
+      result.push({ cards: explicit, weight: 1 });
+    }
+    return result;
+  }
+  const map = parseRangeString(rangeStr);
   for (const [handKey, pct] of map) {
     const combos = _handToCombos(handKey);
     const weightPerCombo = pct / 100;
@@ -9489,6 +9562,167 @@ function _drawCards(pool, n) {
     pool.splice(idx, 1);
   }
   return drawn;
+}
+
+/**
+ * 生成一副 52 张牌（可排除已占用的牌）
+ * @param {string[]} [exclude=[]] 已占用的牌，如公共牌 / 底牌
+ * @returns {string[]}
+ */
+function _buildDeck(exclude = []) {
+  const used = new Set(exclude);
+  const deck = [];
+  for (const r of RANKS) {
+    for (const s of SUITS) {
+      const card = r + s.name;
+      if (!used.has(card)) deck.push(card);
+    }
+  }
+  return deck;
+}
+
+/**
+ * 随机抽 n 张互不相同的牌
+ * @param {number} n
+ * @param {string[]} [exclude=[]]
+ * @returns {string[]} 如 ["As","Kd","7c"]
+ */
+function _randomCards(n, exclude = []) {
+  return _shuffleInPlace(_buildDeck(exclude)).slice(0, n);
+}
+
+/**
+ * 解析字符串里所有"显式指定"的牌（如 "Ah Kd 7s" / "AhKd7s"）
+ * 只要有任一 token 不是具体牌就返回 null（说明这是范围语法）
+ * @param {string} str
+ * @returns {string[]|null}
+ */
+function _parseCardTokens(str) {
+  if (!str) return null;
+  const cards = [];
+  for (const raw of String(str).split(/[\s,]+/).filter(Boolean)) {
+    if (raw.includes(':')) return null;
+    if (raw.length >= 4 && raw.length % 2 === 0) {
+      // 紧凑写法："AhKd" / "AhKd7s" → 每 2 个字符一张牌
+      for (let i = 0; i < raw.length; i += 2) {
+        const c = _normalizeCard(raw.slice(i, i + 2));
+        if (!c) return null;
+        cards.push(c);
+      }
+    } else {
+      const c = _normalizeCard(raw);
+      if (!c) return null;
+      cards.push(c);
+    }
+  }
+  return cards;
+}
+
+/**
+ * 解析"显式指定的两张牌"（如 "As Kd" / "AsKd"）
+ * 范围语法（AA / AKs / 22+）会返回 null，避免与具体牌混淆
+ * @param {string} str
+ * @returns {string[]|null} 两张牌数组；非显式牌格式时返回 null
+ */
+function _parseExplicitCards(str) {
+  const cards = _parseCardTokens(str);
+  if (!cards || cards.length !== 2 || new Set(cards).size !== 2) return null;
+  return cards;
+}
+
+/**
+ * 随机生成 1-2 个手牌型（范围语法），按强度分级加权，强牌更容易被抽中
+ * @param {number} count
+ * @returns {string[]} 如 ["AKs", "Q7s"]
+ */
+function _randomHandTypes(count) {
+  const pool = HAND_DATA.map(x => ({ h: x.h, w: 10 - x.cls }));
+  const picked = [];
+  for (let i = 0; i < count && pool.length; i++) {
+    const total = pool.reduce((s, x) => s + x.w, 0);
+    let r = Math.random() * total;
+    let idx = pool.length - 1;
+    for (let j = 0; j < pool.length; j++) {
+      r -= pool[j].w;
+      if (r <= 0) { idx = j; break; }
+    }
+    picked.push(pool[idx].h);
+    pool.splice(idx, 1);
+  }
+  return picked;
+}
+
+/**
+ * 读取输入框中显式指定的所有牌（范围语法无法确定具体牌，返回空数组）
+ * @param {string} inputId
+ * @returns {string[]}
+ */
+function _explicitCardsFrom(inputId) {
+  const el = document.getElementById(inputId);
+  if (!el) return [];
+  return _parseCardTokens(el.value) || [];
+}
+
+/**
+ * 随机生成公共牌：排除指定输入框里的牌，并保证给定范围仍至少剩 1 个组合
+ * @param {number} count 生成张数
+ * @param {string[]} [excludeIds=[]] 需要避开的输入框 id（取其中的显式牌）
+ * @param {string[]} [avoidIds=[]] 需要保持有效的范围输入框 id
+ * @returns {string[]}
+ */
+function _randomBoard(count, excludeIds = [], avoidIds = []) {
+  const exclude = [];
+  for (const id of excludeIds) exclude.push(..._explicitCardsFrom(id));
+  const avoidRanges = avoidIds
+    .map(id => document.getElementById(id))
+    .filter(el => el && el.value.trim())
+    .map(el => el.value.trim());
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const cards = _randomCards(count, exclude);
+    if (avoidRanges.every(r => _rangeToWeightedCombos(r, cards).length > 0)) return cards;
+  }
+  return _randomCards(count, exclude);
+}
+
+/**
+ * 绑定所有 data-rand 随机生成按钮
+ * data-rand: board（按 data-count 张数生成公共牌）| hand（2 张底牌）| range（1-2 个手牌型）
+ * data-target: 目标输入框 id
+ * data-count: 公共牌张数
+ * data-exclude: 逗号分隔的输入框 id，其中的显式牌会被避开
+ * data-avoid: 逗号分隔的输入框 id，其中的范围必须仍保留至少 1 个组合
+ */
+function _wireRandButtons() {
+  document.querySelectorAll('[data-rand]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.rand;
+      const target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      const excludeIds = (btn.dataset.exclude || '').split(',').filter(Boolean);
+      const avoidIds = (btn.dataset.avoid || '').split(',').filter(Boolean);
+      let value = '';
+      if (kind === 'board') {
+        const n = parseInt(btn.dataset.count, 10) || 3;
+        value = _randomBoard(n, excludeIds, avoidIds).join(' ');
+      } else if (kind === 'hand') {
+        const exclude = [];
+        for (const id of excludeIds) exclude.push(..._explicitCardsFrom(id));
+        value = _randomCards(2, exclude).join(' ');
+      } else if (kind === 'range') {
+        value = _randomHandTypes(1 + (Math.random() < 0.5 ? 1 : 0)).join(', ');
+      }
+      target.value = value;
+      target.dispatchEvent(new Event('input'));
+      if (target.id === 'boardInput') {
+        const cards = value.split(/[\s,]+/).map(_normalizeCard).filter(Boolean);
+        _renderBoardDisplay(cards);
+      }
+      btn.classList.remove('flash');
+      void btn.offsetWidth;
+      btn.classList.add('flash');
+      setTimeout(() => btn.classList.remove('flash'), 700);
+    });
+  });
 }
 
 /**
@@ -9777,28 +10011,31 @@ function _analyzeBoard(boardCards) {
   };
 }
 
+/**
+ * 渲染牌面分析工具的 5 个牌位（空位显示 "?"）
+ * @param {string[]} cards 已规范化的牌数组
+ */
+function _renderBoardDisplay(cards) {
+  const display = document.getElementById('boardDisplay');
+  if (!display) return;
+  display.innerHTML = '';
+  for (let i = 0; i < 5; i++) {
+    const el = document.createElement('div');
+    if (cards[i]) {
+      el.className = 'board-card s-' + cards[i][1];
+      el.textContent = cards[i];
+    } else {
+      el.className = 'board-empty';
+      el.textContent = '?';
+    }
+    display.appendChild(el);
+  }
+}
+
 function runBoardAnalyze() {
   const input = (document.getElementById('boardInput').value || '').trim();
   const cards = input ? input.split(/[\s,]+/).map(_normalizeCard).filter(Boolean) : [];
-  const display = document.getElementById('boardDisplay');
-  // 重渲染 board display
-  display.innerHTML = '';
-  const slots = 5;
-  for (let i = 0; i < slots; i++) {
-    if (cards[i]) {
-      const c = cards[i];
-      const suitClass = 's-' + c[1];
-      const el = document.createElement('div');
-      el.className = 'board-card ' + suitClass;
-      el.textContent = c;
-      display.appendChild(el);
-    } else {
-      const el = document.createElement('div');
-      el.className = 'board-empty';
-      el.textContent = '?';
-      display.appendChild(el);
-    }
-  }
+  _renderBoardDisplay(cards);
   if (cards.length < 3) {
     document.getElementById('boardTextureBadge').textContent = '—';
     document.getElementById('boardTextureBadge').className = 'texture-badge texture-dry';
@@ -10337,7 +10574,7 @@ function runReplayer() {
   const stack = parseFloat(document.getElementById('rpStack').value) || 0;
   const handStr = (document.getElementById('rpHand').value || '').trim();
   const boardStr = (document.getElementById('rpBoard').value || '').trim();
-  const villStr = (document.getElementById('rpVillain').value || '').trim();
+  const villStr = (document.getElementById('rpVillRange').value || '').trim();
   const samples = parseInt(document.getElementById('rpSamples').value, 10) || 300;
   const formulaEl = document.getElementById('rpFormula');
   if (!handStr || !villStr) {
@@ -10367,7 +10604,7 @@ function runReplayer() {
   document.getElementById('rpRecommendWrap').style.display = 'none';
   setTimeout(() => {
     // 1) 计算 hero vs villain 胜率
-    const eq = _calcEquityMonteCarlo({ hero: heroCards.join(','), villain: villStr, board: boardCards, samples });
+    const eq = _calcEquityMonteCarlo({ hero: heroHand, villain: villStr, board: boardCards, samples });
     if (eq.error) {
       formulaEl.textContent = '⚠ ' + eq.error;
       return;
@@ -10430,12 +10667,15 @@ function runReplayer() {
 
 document.getElementById('rpRun').addEventListener('click', runReplayer);
 document.getElementById('rpHand').addEventListener('keydown', (e) => { if (e.key === 'Enter') runReplayer(); });
-document.getElementById('rpVillain').addEventListener('keydown', (e) => { if (e.key === 'Enter') runReplayer(); });
+document.getElementById('rpVillRange').addEventListener('keydown', (e) => { if (e.key === 'Enter') runReplayer(); });
 
 /* Init multi-street streets on first tab visit */
 function _mevMaybeInit() {
   if (_mevStreets.length === 0) _mevInitStreets();
 }
+
+/* 绑定所有"随机生成"按钮（牌面 / 底牌 / 范围） */
+_wireRandButtons();
 </script>
 
 </body>
