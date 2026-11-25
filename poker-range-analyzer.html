@@ -1994,7 +1994,7 @@
         启用 AI 后端（可选）。未配置时使用内置规则引擎。
       </div>
       <input id="apiKeyInput" type="password" placeholder="MiniMax API Key (sk-cp-...)" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px; margin-bottom:4px;" />
-      <input id="apiModelInput" value="MiniMax-M3" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px;" />
+      <input id="apiModelInput" value="MiniMax-M3.1-Flash" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px;" />
       <input id="apiBaseInput" value="https://api.minimax.cn/anthropic/v1/messages" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px; margin-top:4px;" />
       <textarea id="apiSystemPromptInput" placeholder="默认系统提示词（可选）— 控制 AI 输出风格与范围。留空则使用内置默认。" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px; margin-top:4px; min-height:60px; resize:vertical; font-family:inherit;"></textarea>
       <div style="display:flex; gap:4px; margin-top:4px;">
@@ -5401,6 +5401,7 @@ ${inRangeHands.map(h => `${h} ${Number.isInteger(handMax[h]) ? handMax[h] : pars
         model,
         max_tokens: 500000,
         thinking: { type: 'adaptive' },
+        output_config: { effort: LLM_EFFORT_SIMPLE },
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }]
       })
@@ -6433,11 +6434,17 @@ document.getElementById('nlInput').addEventListener('keypress', e => {
 // 安全：API Key 不在源码中硬编码（避免分享 HTML 时泄露）。
 // 首次打开页面会要求用户输入 Key，保存在 localStorage（仅当前浏览器）。
 const DEFAULT_MINIMAX_KEY = '';
-const DEFAULT_MINIMAX_MODEL = 'MiniMax-M3';
+const DEFAULT_MINIMAX_MODEL = 'MiniMax-M3.1-Flash';
+// 旧默认模型：用户没手动改过 model 时自动迁移到新默认
+const LEGACY_MINIMAX_MODEL = 'MiniMax-M3';
 const DEFAULT_MINIMAX_BASE = 'https://api.minimax.cn/anthropic/v1/messages';
 // 思考型模型（thinking: adaptive）会先花掉推理预算再输出正文，
 // max_tokens 太小会让正文为空 —— 表现为"被 max_tokens 截断"
 const LLM_MAX_TOKENS = 32000;
+// M3.1-Flash 的 thinking 强制开启、无法关闭，只能用 output_config.effort 调深度
+//（不传则默认 max，又慢又贵）：简单任务用 low，需要按规则推理的任务用 medium
+const LLM_EFFORT_SIMPLE = 'low';
+const LLM_EFFORT_REASONING = 'medium';
 
 // 统一的 Key/Model/Base URL 读取（含 localStorage fallback 和空值提示）
 /**
@@ -6489,7 +6496,10 @@ function loadOrPromptApiKey() {
   const savedModel = localStorage.getItem('poker_ai_model');
   const savedBase = localStorage.getItem('poker_ai_base');
   const savedSystemPrompt = localStorage.getItem('poker_ai_systemprompt');
-  document.getElementById('apiModelInput').value = savedModel || DEFAULT_MINIMAX_MODEL;
+  // 旧默认模型自动迁移到新默认；用户手动选过别的模型则保持不变
+  const model = (!savedModel || savedModel === LEGACY_MINIMAX_MODEL) ? DEFAULT_MINIMAX_MODEL : savedModel;
+  document.getElementById('apiModelInput').value = model;
+  if (savedModel === LEGACY_MINIMAX_MODEL) localStorage.setItem('poker_ai_model', model);
   const baseEl = document.getElementById('apiBaseInput');
   if (baseEl) baseEl.value = savedBase || DEFAULT_MINIMAX_BASE;
   const sysEl = document.getElementById('apiSystemPromptInput');
@@ -6652,6 +6662,7 @@ async function callLLM(apiKey, model, userText, parsed) {
       model: model,
       max_tokens: LLM_MAX_TOKENS,
       thinking: { type: 'adaptive' },
+      output_config: { effort: LLM_EFFORT_REASONING },
       system: systemPrompt,
       messages: [{ role: 'user', content: prompt }]
     })
@@ -7760,6 +7771,7 @@ async function startBattle() {
           model,
           max_tokens: maxTokens,
           thinking: { type: 'adaptive' },
+          output_config: { effort: LLM_EFFORT_REASONING },
           system: systemPrompt,
           messages: [{ role: 'user', content: prompt }]
         })
@@ -9022,6 +9034,7 @@ ${validActions}
         model,
         max_tokens: LLM_MAX_TOKENS,
         thinking: { type: 'adaptive' },
+        output_config: { effort: LLM_EFFORT_SIMPLE },
         system: '你是德州扑克 GTO AI 玩家。严格按照 JSON 格式输出决策，不输出任何其他文字。',
         messages: [
           { role: 'user', content: prompt },
@@ -9522,7 +9535,7 @@ function _handToCombos(handKey) {
  * 也支持显式指定的两张牌（如 "As Kd"），此时视为单一组合
  * @param {string} rangeStr
  * @param {string[]} blockedCards 标准化的牌字符串数组
- * @returns {Array<{cards:string[], weight:number}>}
+ * @returns {Array<{cards:string[], weight:number, handKey:string}>}
  */
 function _rangeToWeightedCombos(rangeStr, blockedCards) {
   const blocked = new Set(blockedCards || []);
@@ -9530,7 +9543,7 @@ function _rangeToWeightedCombos(rangeStr, blockedCards) {
   const explicit = _parseExplicitCards(rangeStr);
   if (explicit) {
     if (!blocked.has(explicit[0]) && !blocked.has(explicit[1])) {
-      result.push({ cards: explicit, weight: 1 });
+      result.push({ cards: explicit, weight: 1, handKey: explicit.join('') });
     }
     return result;
   }
@@ -9540,7 +9553,7 @@ function _rangeToWeightedCombos(rangeStr, blockedCards) {
     const weightPerCombo = pct / 100;
     for (const cards of combos) {
       if (blocked.has(cards[0]) || blocked.has(cards[1])) continue;
-      result.push({ cards, weight: weightPerCombo });
+      result.push({ cards, weight: weightPerCombo, handKey });
     }
   }
   return result;
