@@ -6435,6 +6435,9 @@ document.getElementById('nlInput').addEventListener('keypress', e => {
 const DEFAULT_MINIMAX_KEY = '';
 const DEFAULT_MINIMAX_MODEL = 'MiniMax-M3';
 const DEFAULT_MINIMAX_BASE = 'https://api.minimax.cn/anthropic/v1/messages';
+// 思考型模型（thinking: adaptive）会先花掉推理预算再输出正文，
+// max_tokens 太小会让正文为空 —— 表现为"被 max_tokens 截断"
+const LLM_MAX_TOKENS = 32000;
 
 // 统一的 Key/Model/Base URL 读取（含 localStorage fallback 和空值提示）
 /**
@@ -6647,7 +6650,7 @@ async function callLLM(apiKey, model, userText, parsed) {
     },
     body: JSON.stringify({
       model: model,
-      max_tokens: 10000,
+      max_tokens: LLM_MAX_TOKENS,
       thinking: { type: 'adaptive' },
       system: systemPrompt,
       messages: [{ role: 'user', content: prompt }]
@@ -7743,38 +7746,44 @@ async function startBattle() {
 8. 解释要具体到这手牌和这个场景`;
 
   try {
-    const response = await fetch(baseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 10000,
-        thinking: { type: 'adaptive' },
-        system: systemPrompt,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
+    // 单次请求：思考型模型可能把预算全花在思考上，导致正文为空
+    const requestScenario = async (maxTokens) => {
+      const response = await fetch(baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          thinking: { type: 'adaptive' },
+          system: systemPrompt,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
 
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`HTTP ${response.status}: ${err.substring(0, 200)}`);
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`HTTP ${response.status}: ${err.substring(0, 200)}`);
+      }
+
+      const data = await response.json();
+      // 聚合所有 text 块（thinking 模式下可能多个 text 块混合在 thinking 之间）
+      const textBlocks = (data.content || []).filter(c => c.type === 'text');
+      const raw = textBlocks.map(c => c.text || '').join('');
+      const truncated = data.stop_reason === 'max_tokens';
+      return { raw, truncated, scenario: parseBattleScenario(raw, truncated) };
+    };
+
+    let result = await requestScenario(LLM_MAX_TOKENS);
+    // 正文为空 = 模型把预算全花在思考上，用更大预算重试一次
+    if (!result.scenario && !result.raw) {
+      result = await requestScenario(LLM_MAX_TOKENS * 2);
     }
-
-    const data = await response.json();
-    // 聚合所有 text 块（thinking 模式下可能多个 text 块混合在 thinking 之间）
-    const textBlocks = (data.content || []).filter(c => c.type === 'text');
-    const raw = textBlocks.map(c => c.text || '').join('');
-    const stopReason = data.stop_reason;
-    const truncated = stopReason === 'max_tokens';
-    const thinkingTokens = (data.usage && data.usage.output_tokens) || 0;
-
-    // 尝试解析 AI 返回的 JSON（含截断修复）
-    const scenario = parseBattleScenario(raw, truncated);
+    const { raw, truncated, scenario } = result;
     if (!scenario) {
       let detail = raw.substring(0, 200);
       if (!detail) detail = '(空响应 — 模型可能把全部预算花在思考上)';
@@ -9011,7 +9020,7 @@ ${validActions}
       },
       body: JSON.stringify({
         model,
-        max_tokens: 10000,
+        max_tokens: LLM_MAX_TOKENS,
         thinking: { type: 'adaptive' },
         system: '你是德州扑克 GTO AI 玩家。严格按照 JSON 格式输出决策，不输出任何其他文字。',
         messages: [
