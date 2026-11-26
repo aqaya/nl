@@ -46,12 +46,12 @@
 【技术栈】
   - 单文件 HTML（HTML + CSS + JavaScript，原生 ES6+）
   - 无外部依赖，无构建步骤
-  - fetch + Anthropic Messages API（MiniMax 兼容）
+  - fetch + Anthropic Messages API（MiniMax / 阿里百炼 Bailian 兼容，可切换）
   - 状态保存在内存（无 localStorage 持久化）
 
 【本地运行】
   直接用浏览器打开此 HTML 即可。如需对接自有 LLM：
-    - 「AI 设置」面板填 Base URL / Key / Model
+    - 「AI 设置」面板选择厂商（MiniMax / 阿里百炼），填 Base URL / Key / Model
     - 不填则使用内置规则引擎（兜底）
 
 【目录约定 / 代码索引（行号按当前文件）】
@@ -84,6 +84,9 @@
   - [NOTE] 新增位置时，同步更新 POS_DISPLAY / buildSeatRing /
           abPositionsFor / 6max-100bb 等 RANGE_DB 键值。
   - [NOTE] 修改默认 API key 时请尊重原作者意图，留空让用户自填。
+  - [NOTE] LLM 厂商差异（Base URL / thinking 参数 / output_config）都收敛在
+          LLM_PROVIDERS 注册表里，新增厂商只需加一项并改 llmRequest 调用点。
+          MiniMax 的 thinking 只认 adaptive；百炼只认 enabled / disabled。
   - [NOTE] 自动对战的 contributed 是「本街」投入额（每街归零，用于跟注/收口
           判断），totalContrib 是整手累计（边池分配和盈亏结算用它）。改跟注
           金额语义时两者要同步，否则会出现「底池凭空增减」或街道永不收口。
@@ -1996,9 +1999,15 @@
       <div style="font-size:11px; color:#888; margin-bottom:6px;">
         启用 AI 后端（可选）。未配置时使用内置规则引擎。
       </div>
+      <select id="apiProviderSelect" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px; margin-bottom:4px; background:#fff; color:#2d3436;">
+        <option value="minimax">MiniMax（Anthropic 兼容）</option>
+        <option value="bailian">阿里百炼 Bailian（Anthropic 兼容）</option>
+      </select>
       <input id="apiKeyInput" type="password" placeholder="MiniMax API Key (sk-cp-...)" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px; margin-bottom:4px;" />
-      <input id="apiModelInput" value="MiniMax-M3.1-Flash" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px;" />
+      <input id="apiModelInput" list="apiModelList" value="MiniMax-M3.1-Flash" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px;" />
+      <datalist id="apiModelList"></datalist>
       <input id="apiBaseInput" value="https://api.minimax.cn/anthropic/v1/messages" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px; margin-top:4px;" />
+      <div id="apiProviderHint" style="font-size:10px; color:#888; margin-top:4px; line-height:1.5;"></div>
       <textarea id="apiSystemPromptInput" placeholder="默认系统提示词（可选）— 控制 AI 输出风格与范围。留空则使用内置默认。" style="width:100%; padding:5px; font-size:11px; border:1px solid #dfe6e9; border-radius:3px; margin-top:4px; min-height:60px; resize:vertical; font-family:inherit;"></textarea>
       <div style="display:flex; gap:4px; margin-top:4px;">
         <button id="apiSystemPromptResetBtn" style="flex:1; padding:4px; font-size:10px; border:1px solid #dfe6e9; background:#fff; border-radius:3px; cursor:pointer;">恢复默认</button>
@@ -5329,7 +5338,6 @@ document.getElementById('filterByUseTableBtn').addEventListener('click', filterB
 */
 async function aiRecommendTopStrength(pct) {
   if (!ensureApiKey()) return;
-  const { apiKey, model, baseUrl } = getApiCreds();
 
   const inRangeHands = Object.keys(state.tableRange).filter(k => state.tableRange[k] && state.tableRange[k] !== 'fold');
   const hint = document.getElementById('autoSyncHint');
@@ -5392,30 +5400,11 @@ ${inRangeHands.map(h => `${h} ${Number.isInteger(handMax[h]) ? handMax[h] : pars
 
   const systemPrompt = getEffectiveSystemPrompt();
   try {
-    const response = await fetch(baseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 500000,
-        thinking: { type: 'adaptive' },
-        output_config: { effort: LLM_EFFORT_SIMPLE },
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }]
-      })
+    const { text } = await llmRequest({
+      userPrompt,
+      system: systemPrompt,
+      effort: LLM_EFFORT_SIMPLE
     });
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errText.substring(0, 200)}`);
-    }
-    const data = await response.json();
-    const textBlocks = (data.content || []).filter(c => c.type === 'text');
-    const text = textBlocks.map(c => c.text || '').join('');
     // Try to extract JSON object from the response (in case it's wrapped in markdown)
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -6385,8 +6374,7 @@ document.getElementById('nlAnalyzeBtn').addEventListener('click', async () => {
     return;
   }
 
-  const apiKey = document.getElementById('apiKeyInput').value.trim();
-  const model = document.getElementById('apiModelInput').value.trim();
+  const apiKey = getApiCreds().apiKey;
 
   // Update selectors from parsed input — 仅当解析器识别到时才覆盖，保留用户原有选择
   const parsed = parseNaturalLanguage(input);
@@ -6398,7 +6386,7 @@ document.getElementById('nlAnalyzeBtn').addEventListener('click', async () => {
     // Use real LLM API
     showAiFeedback('🤖 正在调用 AI 模型分析...', 'thinking');
     try {
-      const rangeStr = await callLLM(apiKey, model, input, parsed);
+      const rangeStr = await callLLM(input, parsed);
       if (rangeStr) {
         const parsedMap = parseRangeString(rangeStr);
         const mixed = Array.from(parsedMap.entries()).filter(([h, p]) => p > 0 && p < 100);
@@ -6431,34 +6419,95 @@ document.getElementById('nlInput').addEventListener('keypress', e => {
 
 /* ----- LLM API integration (Anthropic-compatible) ----- */
 
-/* ----- Default MiniMax initialization -----
-   User-provided defaults are baked in so the AI panel works out-of-the-box.
-   The user can override these at any time; overrides persist to localStorage. */
-// 安全：API Key 不在源码中硬编码（避免分享 HTML 时泄露）。
-// 首次打开页面会要求用户输入 Key，保存在 localStorage（仅当前浏览器）。
-const DEFAULT_MINIMAX_KEY = '';
-const DEFAULT_MINIMAX_MODEL = 'MiniMax-M3.1-Flash';
+/* ----- 多厂商接入（Anthropic 兼容协议）-----
+   MiniMax 与阿里百炼都提供 Anthropic 兼容的 /v1/messages 接口，
+   差异只在 Base URL / 模型名 / 思考参数，由 LLM_PROVIDERS 统一描述。
+   安全：API Key 不在源码中硬编码（避免分享 HTML 时泄露），
+   仅保存在用户浏览器 localStorage。 */
 // 旧默认模型：用户没手动改过 model 时自动迁移到新默认
 const LEGACY_MINIMAX_MODEL = 'MiniMax-M3';
-const DEFAULT_MINIMAX_BASE = 'https://api.minimax.cn/anthropic/v1/messages';
-// 思考型模型（thinking: adaptive）会先花掉推理预算再输出正文，
-// max_tokens 太小会让正文为空 —— 表现为"被 max_tokens 截断"
+// 单次请求的默认 token 预算；思考型模型会先花掉推理预算再输出正文，
+// 预算太小会让正文为空 —— 表现为「被 max_tokens 截断」
 const LLM_MAX_TOKENS = 32000;
 // M3.1-Flash 的 thinking 强制开启、无法关闭，只能用 output_config.effort 调深度
 //（不传则默认 max，又慢又贵）：简单任务用 low，需要按规则推理的任务用 medium
 const LLM_EFFORT_SIMPLE = 'low';
 const LLM_EFFORT_REASONING = 'medium';
 
+const LLM_PROVIDERS = {
+  minimax: {
+    label: 'MiniMax',
+    // localStorage 键前缀 → poker_ai_apikey / poker_ai_model / poker_ai_base
+    storagePrefix: 'poker_ai_',
+    defaultModel: 'MiniMax-M3.1-Flash',
+    defaultBase: 'https://api.minimax.cn/anthropic/v1/messages',
+    keyPlaceholder: 'MiniMax API Key (sk-cp-...)',
+    modelSuggestions: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
+    // 单次请求的 max_tokens 上限（超出部分由 llmRequest 截断）
+    tokenCap: 64000,
+    // M3.1-Flash 只认 adaptive，且 output_config.effort 是唯一的深度旋钮
+    buildExtras: (effort) => ({
+      thinking: { type: 'adaptive' },
+      output_config: { effort }
+    }),
+    extraHeaders: { 'anthropic-dangerous-direct-browser-access': 'true' },
+    hint: 'MiniMax 原生 Anthropic 兼容端点，Key 形如 <code>sk-cp-…</code>。'
+  },
+  bailian: {
+    label: '阿里百炼 Bailian',
+    // localStorage 键前缀 → poker_ai_bailian_apikey / _model / _base
+    storagePrefix: 'poker_ai_bailian_',
+    defaultModel: 'qwen3.7-plus',
+    defaultBase: 'https://dashscope.aliyuncs.com/apps/anthropic/v1/messages',
+    keyPlaceholder: '百炼 API Key (sk-…)',
+    modelSuggestions: [
+      'qwen3.7-plus', 'qwen3.8-max', 'qwen3.8-flash', 'qwen4-max', 'qwen3.7-max',
+      'qwen3.6-plus', 'qwen3.6-flash', 'deepseek-v4.1-flash', 'glm-5.3', 'kimi-k3'
+    ],
+    tokenCap: 32768,
+    // 百炼的 thinking 只接受 enabled / disabled（没有 adaptive）；
+    // effort 通过 output_config.effort 传，仅在开启思考时生效
+    buildExtras: (effort) => effort
+      ? { thinking: { type: 'enabled' }, output_config: { effort } }
+      : { thinking: { type: 'disabled' } },
+    extraHeaders: {},
+    hint: '百炼 Anthropic 兼容端点：<code>https://dashscope.aliyuncs.com/apps/anthropic/v1/messages</code>；'
+      + '业务空间专属域名请把 <code>{WorkspaceId}</code> 换成实际空间 ID。Key 与域名必须同地域，否则 401。'
+  }
+};
+const DEFAULT_LLM_PROVIDER = 'minimax';
+
+/**
+ * 当前生效的厂商 id（不存在或非法时回落到默认厂商）
+ * @returns {string}
+ */
+function getActiveProviderId() {
+  const id = localStorage.getItem('poker_ai_provider');
+  return (id && LLM_PROVIDERS[id]) ? id : DEFAULT_LLM_PROVIDER;
+}
+
+/**
+ * 厂商配置的 localStorage 键名
+ * @param {string} providerId
+ * @param {'apikey'|'model'|'base'} field
+ * @returns {string}
+ */
+function providerStorageKey(providerId, field) {
+  return LLM_PROVIDERS[providerId].storagePrefix + field;
+}
+
 // 统一的 Key/Model/Base URL 读取（含 localStorage fallback 和空值提示）
 /**
- * 集中读取 LLM API 凭证：优先 localStorage，其次面板输入框，最后默认
- * @returns {{apiKey:string, model:string, baseUrl:string}}
+ * 集中读取当前厂商的 LLM 凭证：优先 localStorage，其次面板输入框，最后默认
+ * @returns {{apiKey:string, model:string, baseUrl:string, provider:string, tokenCap:number}}
  */
 function getApiCreds() {
-  const apiKey = (localStorage.getItem('poker_ai_apikey') || document.getElementById('apiKeyInput')?.value || '').trim();
-  const model = (document.getElementById('apiModelInput')?.value || DEFAULT_MINIMAX_MODEL).trim();
-  const baseUrl = (document.getElementById('apiBaseInput')?.value || DEFAULT_MINIMAX_BASE).trim();
-  return { apiKey, model, baseUrl };
+  const provider = getActiveProviderId();
+  const p = LLM_PROVIDERS[provider];
+  const apiKey = (localStorage.getItem(providerStorageKey(provider, 'apikey')) || document.getElementById('apiKeyInput')?.value || '').trim();
+  const model = (document.getElementById('apiModelInput')?.value || p.defaultModel).trim();
+  const baseUrl = (document.getElementById('apiBaseInput')?.value || p.defaultBase).trim();
+  return { apiKey, model, baseUrl, provider, tokenCap: p.tokenCap };
 }
 /**
  * 确保已有 API Key：若无则弹窗要求输入
@@ -6488,32 +6537,126 @@ function getEffectiveSystemPrompt() {
   return userValue || DEFAULT_SYSTEM_PROMPT;
 }
 
+/**
+ * 统一 LLM 调用（Anthropic 兼容协议），按当前厂商适配请求体
+ * 各厂商差异（thinking 参数、output_config、额外 header）都收敛在 LLM_PROVIDERS 里
+ * @param {{userPrompt?:string, system?:string, messages?:Array, maxTokens?:number, effort?:string}} opts
+ *   userPrompt  - 单条 user 消息内容（与 messages 二选一）
+ *   messages    - 完整消息数组（优先于 userPrompt）
+ *   effort      - 推理深度档位（low / medium），决定 thinking 与 output_config 的写法
+ * @returns {Promise<{text:string, stopReason:string}>}
+ */
+async function llmRequest(opts) {
+  const { apiKey, model, baseUrl, provider, tokenCap } = getApiCreds();
+  const p = LLM_PROVIDERS[provider];
+  const body = {
+    model,
+    max_tokens: Math.min(opts.maxTokens || LLM_MAX_TOKENS, tokenCap),
+    system: opts.system,
+    messages: opts.messages || [{ role: 'user', content: opts.userPrompt }]
+  };
+  Object.assign(body, p.buildExtras(opts.effort));
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    ...p.extraHeaders
+  };
+
+  const doFetch = (maxTokens) => fetch(baseUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ...body, max_tokens: maxTokens })
+  });
+
+  let response = await doFetch(body.max_tokens);
+  if (!response.ok && response.status === 400) {
+    const errText = await response.text();
+    if (/max_tokens/i.test(errText) && body.max_tokens > 8192) {
+      // 模型输出上限低于请求值 → 降一档重试
+      response = await doFetch(8192);
+    } else if (/output_config|effort/i.test(errText) && body.output_config) {
+      // 该厂商/模型不接受 output_config.effort → 摘掉重试
+      const retryBody = { ...body };
+      delete retryBody.output_config;
+      response = await fetch(baseUrl, {
+        method: 'POST', headers,
+        body: JSON.stringify({ ...retryBody, max_tokens: body.max_tokens })
+      });
+    } else {
+      throw new Error(`HTTP ${response.status}: ${errText.substring(0, 200)}`);
+    }
+  }
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errText.substring(0, 200)}`);
+  }
+
+  const data = await response.json();
+  // 聚合所有 text 块（thinking 模式下可能多个 text 块混合在 thinking 之间）
+  const textBlocks = (data.content || []).filter(c => c.type === 'text');
+  return { text: textBlocks.map(c => c.text || '').join(''), stopReason: data.stop_reason };
+}
+
 /* ----- API Key 加载：优先 localStorage，没有则弹窗要求输入 -----
    安全原则：源码中不硬编码 key，仅在用户浏览器 localStorage 中保存 */
 /**
- * 页面启动时加载 localStorage 里的 API 配置（key/model/baseUrl/systemPrompt）；
- * 若没有 key 则弹出输入弹窗
+ * 把某个厂商已保存的配置载入设置面板（key/model/base + 提示文案 + 模型候选）
+ * @param {string} providerId
+ */
+function applyProviderToPanel(providerId) {
+  const p = LLM_PROVIDERS[providerId];
+  const keyEl = document.getElementById('apiKeyInput');
+  const modelEl = document.getElementById('apiModelInput');
+  const baseEl = document.getElementById('apiBaseInput');
+  if (keyEl) {
+    keyEl.value = localStorage.getItem(providerStorageKey(providerId, 'apikey')) || '';
+    keyEl.placeholder = p.keyPlaceholder;
+  }
+  if (modelEl) modelEl.value = localStorage.getItem(providerStorageKey(providerId, 'model')) || p.defaultModel;
+  if (baseEl) baseEl.value = localStorage.getItem(providerStorageKey(providerId, 'base')) || p.defaultBase;
+  const listEl = document.getElementById('apiModelList');
+  if (listEl) listEl.innerHTML = p.modelSuggestions.map(m => `<option value="${m}"></option>`).join('');
+  const hintEl = document.getElementById('apiProviderHint');
+  if (hintEl) hintEl.innerHTML = p.hint;
+  const selEl = document.getElementById('apiProviderSelect');
+  if (selEl) selEl.value = providerId;
+}
+
+/**
+ * 把面板当前内容写回指定厂商的 localStorage（切换厂商前调用，避免互相覆盖）
+ * @param {string} [providerId] 缺省为当前生效的厂商
+ */
+function saveProviderConfig(providerId) {
+  const provider = providerId || getActiveProviderId();
+  const keyEl = document.getElementById('apiKeyInput');
+  const modelEl = document.getElementById('apiModelInput');
+  const baseEl = document.getElementById('apiBaseInput');
+  if (keyEl && keyEl.value.trim()) localStorage.setItem(providerStorageKey(provider, 'apikey'), keyEl.value.trim());
+  if (modelEl) localStorage.setItem(providerStorageKey(provider, 'model'), modelEl.value.trim());
+  if (baseEl) localStorage.setItem(providerStorageKey(provider, 'base'), baseEl.value.trim());
+}
+
+/**
+ * 页面启动时加载 localStorage 里的 API 配置（provider/key/model/baseUrl/systemPrompt）；
+ * 若当前厂商没有 key 则弹出输入弹窗
  */
 function loadOrPromptApiKey() {
-  const savedKey = localStorage.getItem('poker_ai_apikey');
-  const savedModel = localStorage.getItem('poker_ai_model');
-  const savedBase = localStorage.getItem('poker_ai_base');
-  const savedSystemPrompt = localStorage.getItem('poker_ai_systemprompt');
+  const provider = getActiveProviderId();
   // 旧默认模型自动迁移到新默认；用户手动选过别的模型则保持不变
-  const model = (!savedModel || savedModel === LEGACY_MINIMAX_MODEL) ? DEFAULT_MINIMAX_MODEL : savedModel;
-  document.getElementById('apiModelInput').value = model;
-  if (savedModel === LEGACY_MINIMAX_MODEL) localStorage.setItem('poker_ai_model', model);
-  const baseEl = document.getElementById('apiBaseInput');
-  if (baseEl) baseEl.value = savedBase || DEFAULT_MINIMAX_BASE;
+  if (provider === 'minimax') {
+    const savedModel = localStorage.getItem('poker_ai_model');
+    if (!savedModel || savedModel === LEGACY_MINIMAX_MODEL) {
+      localStorage.setItem('poker_ai_model', LLM_PROVIDERS.minimax.defaultModel);
+    }
+  }
+  applyProviderToPanel(provider);
   const sysEl = document.getElementById('apiSystemPromptInput');
-  if (sysEl) sysEl.value = savedSystemPrompt || '';
+  if (sysEl) sysEl.value = localStorage.getItem('poker_ai_systemprompt') || '';
   const keyEl = document.getElementById('apiKeyInput');
-  if (savedKey) {
-    // 已有 localStorage key → 直接填入
-    keyEl.value = savedKey;
-  } else if (keyEl) {
-    // 首次使用 → 弹窗要求输入
-    keyEl.value = '';
+  if (keyEl && !keyEl.value) {
+    // 首次使用该厂商 → 弹窗要求输入
     promptForApiKey();
   }
 }
@@ -6523,6 +6666,8 @@ function loadOrPromptApiKey() {
  * 支持 Enter 保存、点击外部关闭、"稍后"按钮跳过
  */
 function promptForApiKey() {
+  const provider = getActiveProviderId();
+  const p = LLM_PROVIDERS[provider];
   // 移除已存在的弹窗（避免重复）
   const existing = document.getElementById('apiKeyModal');
   if (existing) existing.remove();
@@ -6531,12 +6676,12 @@ function promptForApiKey() {
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
   overlay.innerHTML = `
     <div style="background:#2d3436;color:#fff;padding:24px 28px;border-radius:8px;max-width:480px;width:90%;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
-      <h3 style="margin:0 0 8px;font-size:16px;color:#74b9ff;">🔑 请输入 MiniMax API Key</h3>
+      <h3 style="margin:0 0 8px;font-size:16px;color:#74b9ff;">🔑 请输入 ${p.label} API Key</h3>
       <p style="margin:0 0 14px;font-size:12px;color:#b2bec3;line-height:1.5;">
         这是首次使用本程序。Key 将保存在<strong style="color:#ffeaa7;">浏览器 localStorage</strong>（仅本机本浏览器），
         不会上传到任何服务器。后续打开会自动读取。
       </p>
-      <input id="apiKeyModalInput" type="password" placeholder="sk-cp-..." style="width:100%;padding:8px;font-size:13px;border:1px solid #636e72;border-radius:4px;background:#1e2426;color:#fff;box-sizing:border-box;font-family:monospace;" />
+      <input id="apiKeyModalInput" type="password" placeholder="${p.keyPlaceholder}" style="width:100%;padding:8px;font-size:13px;border:1px solid #636e72;border-radius:4px;background:#1e2426;color:#fff;box-sizing:border-box;font-family:monospace;" />
       <div style="margin-top:6px;font-size:11px;color:#636e72;">Base URL 和 Model 可在 AI 设置面板里修改</div>
       <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
         <button id="apiKeyModalCancel" style="background:#636e72;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;">稍后</button>
@@ -6552,7 +6697,7 @@ function promptForApiKey() {
   const save = () => {
     const val = input.value.trim();
     if (!val) { input.focus(); return; }
-    localStorage.setItem('poker_ai_apikey', val);
+    localStorage.setItem(providerStorageKey(provider, 'apikey'), val);
     document.getElementById('apiKeyInput').value = val;
     overlay.remove();
   };
@@ -6571,24 +6716,34 @@ const _apiKeyInput = document.getElementById('apiKeyInput');
 const _apiModelInput = document.getElementById('apiModelInput');
 const _apiBaseInput = document.getElementById('apiBaseInput');
 const _apiSystemPromptInput = document.getElementById('apiSystemPromptInput');
+const _apiProviderSelect = document.getElementById('apiProviderSelect');
 const _resetApiKeyBtn = document.getElementById('resetApiKeyBtn');
 const _sysResetBtn = document.getElementById('apiSystemPromptResetBtn');
 const _sysClearBtn = document.getElementById('apiSystemPromptClearBtn');
+if (_apiProviderSelect) _apiProviderSelect.addEventListener('change', e => {
+  const prev = getActiveProviderId();
+  const next = e.target.value;
+  if (next === prev || !LLM_PROVIDERS[next]) return;
+  saveProviderConfig(prev);     // 先把旧厂商的面板内容落盘，再切
+  localStorage.setItem('poker_ai_provider', next);
+  applyProviderToPanel(next);
+  showAiFeedback(`✓ 已切换到 ${LLM_PROVIDERS[next].label}`, 'success');
+});
 if (_apiKeyInput) _apiKeyInput.addEventListener('blur', e => {
   if (e.target.value && e.target.value.trim()) {
-    localStorage.setItem('poker_ai_apikey', e.target.value.trim());
+    localStorage.setItem(providerStorageKey(getActiveProviderId(), 'apikey'), e.target.value.trim());
   }
 });
 if (_resetApiKeyBtn) _resetApiKeyBtn.addEventListener('click', () => {
-  localStorage.removeItem('poker_ai_apikey');
+  localStorage.removeItem(providerStorageKey(getActiveProviderId(), 'apikey'));
   if (_apiKeyInput) _apiKeyInput.value = '';
   promptForApiKey();
 });
 if (_apiModelInput) _apiModelInput.addEventListener('blur', e => {
-  localStorage.setItem('poker_ai_model', e.target.value);
+  localStorage.setItem(providerStorageKey(getActiveProviderId(), 'model'), e.target.value);
 });
 if (_apiBaseInput) _apiBaseInput.addEventListener('blur', e => {
-  localStorage.setItem('poker_ai_base', e.target.value);
+  localStorage.setItem(providerStorageKey(getActiveProviderId(), 'base'), e.target.value);
 });
 if (_apiSystemPromptInput) _apiSystemPromptInput.addEventListener('blur', e => {
   localStorage.setItem('poker_ai_systemprompt', e.target.value);
@@ -6607,13 +6762,11 @@ if (_sysClearBtn) _sysClearBtn.addEventListener('click', () => {
 /* ----- LLM API integration (Anthropic-compatible) ----- */
 /**
  * 调用 LLM（Anthropic 兼容协议）让模型直接给出范围字符串
- * @param {string} apiKey
- * @param {string} model
  * @param {string} userText 用户输入的自然语言描述
  * @param {{gameType:string, position:string, situation:string}} parsed 解析后的三元组
  * @returns {Promise<string|null>} 解析出的范围字符串（可能为 null）
  */
-async function callLLM(apiKey, model, userText, parsed) {
+async function callLLM(userText, parsed) {
   const prompt = `你是一名德州扑克（Texas Hold'em）GTO 顾问。基于以下牌局情境，输出建议的开牌/行动范围，格式为简洁的逗号分隔的手牌表达列表。
 
 游戏类型: ${parsed.gameType}
@@ -6651,35 +6804,12 @@ async function callLLM(apiKey, model, userText, parsed) {
 - 99+, AQs+, AKo
 - 77+, A2s+, K9s+, K8s, QTs+, Q9s, Q8s:50, JTs, T9s, 98s:50, 87s:75, 76s:75, 65s:75, 54s:50, AJo+, ATo:75, KQo, KJo, QJo`;
 
-  const baseUrl = (document.getElementById('apiBaseInput')?.value || DEFAULT_MINIMAX_BASE).trim();
   const systemPrompt = getEffectiveSystemPrompt();
-  const response = await fetch(baseUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: model,
-      max_tokens: LLM_MAX_TOKENS,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: LLM_EFFORT_REASONING },
-      system: systemPrompt,
-      messages: [{ role: 'user', content: prompt }]
-    })
+  const { text } = await llmRequest({
+    userPrompt: prompt,
+    system: systemPrompt,
+    effort: LLM_EFFORT_REASONING
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${errText.substring(0, 200)}`);
-  }
-
-  const data = await response.json();
-  // 聚合所有 text 块（thinking 模式下可能多个 text 块混合在 thinking 之间）
-  const textBlocks = (data.content || []).filter(c => c.type === 'text');
-  const text = textBlocks.map(c => c.text || '').join('');
   // Strip code fences and any leading explanation
   const stripped = text
     .replace(/```[\s\S]*?```/g, '')
@@ -7652,7 +7782,7 @@ async function startBattle() {
   document.getElementById('battleFeedback').innerHTML = '';
 
   // 关键校验：在 try 外先检查 key，避免 throw 逃逸 try/catch
-  const apiKey = (localStorage.getItem('poker_ai_apikey') || document.getElementById('apiKeyInput').value || DEFAULT_MINIMAX_KEY).trim();
+  const { apiKey, tokenCap } = getApiCreds();
   if (!apiKey) {
     promptForApiKey();
     btn.disabled = false;
@@ -7661,8 +7791,6 @@ async function startBattle() {
       `<div class="battle-pending" style="color:#ff7675;">❌ 请先输入 API Key（弹窗已弹出）。保存后再次点击"开始新场景"。</div>`;
     return;
   }
-  const model = (document.getElementById('apiModelInput').value || DEFAULT_MINIMAX_MODEL).trim();
-  const baseUrl = (document.getElementById('apiBaseInput')?.value || DEFAULT_MINIMAX_BASE).trim();
   const systemPrompt = getEffectiveSystemPrompt();
 
   const prompt = `你是一名德州扑克 GTO 教学教练。请生成一个学习场景（**优先出翻牌后场景**：约 75% 翻后、25% 翻前；包括 flop/turn/river 的 bet/check/raise 决策），按以下 JSON 格式输出（仅输出 JSON，不要任何额外文字、Markdown 或代码块）：
@@ -7762,41 +7890,20 @@ async function startBattle() {
   try {
     // 单次请求：思考型模型可能把预算全花在思考上，导致正文为空
     const requestScenario = async (maxTokens) => {
-      const response = await fetch(baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: maxTokens,
-          thinking: { type: 'adaptive' },
-          output_config: { effort: LLM_EFFORT_REASONING },
-          system: systemPrompt,
-          messages: [{ role: 'user', content: prompt }]
-        })
+      const { text: raw, stopReason } = await llmRequest({
+        userPrompt: prompt,
+        system: systemPrompt,
+        maxTokens: maxTokens,
+        effort: LLM_EFFORT_REASONING
       });
-
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`HTTP ${response.status}: ${err.substring(0, 200)}`);
-      }
-
-      const data = await response.json();
-      // 聚合所有 text 块（thinking 模式下可能多个 text 块混合在 thinking 之间）
-      const textBlocks = (data.content || []).filter(c => c.type === 'text');
-      const raw = textBlocks.map(c => c.text || '').join('');
-      const truncated = data.stop_reason === 'max_tokens';
+      const truncated = stopReason === 'max_tokens';
       return { raw, truncated, scenario: parseBattleScenario(raw, truncated) };
     };
 
     let result = await requestScenario(LLM_MAX_TOKENS);
     // 正文为空 = 模型把预算全花在思考上，用更大预算重试一次
     if (!result.scenario && !result.raw) {
-      result = await requestScenario(LLM_MAX_TOKENS * 2);
+      result = await requestScenario(Math.min(LLM_MAX_TOKENS * 2, tokenCap));
     }
     const { raw, truncated, scenario } = result;
     if (!scenario) {
@@ -8983,7 +9090,7 @@ function _abPreflopHeuristicDecision(seat, callAmt, minRaise) {
  * @returns {Promise<{action:string, amount:number}>} 规范化后的决策
  */
 async function abAskAI(seat) {
-  const apiKey = (localStorage.getItem('poker_ai_apikey') || document.getElementById('apiKeyInput').value || DEFAULT_MINIMAX_KEY).trim();
+  const { apiKey, provider } = getApiCreds();
   const callAmt = autoBattle.highBet - seat.contributed;
   const minRaise = Math.max(autoBattle.highBet + autoBattle.minRaise, autoBattle.highBet * 2);
 
@@ -8994,8 +9101,6 @@ async function abAskAI(seat) {
     return _abPreflopHeuristicDecision(seat, callAmt, minRaise);
   }
 
-  const model = (document.getElementById('apiModelInput').value || DEFAULT_MINIMAX_MODEL).trim();
-  const baseUrl = (document.getElementById('apiBaseInput')?.value || DEFAULT_MINIMAX_BASE).trim();
   const systemPrompt = getEffectiveSystemPrompt();
 
   const handTxt = seat.holeCards.map(abCardLabel).join(' ');
@@ -9041,31 +9146,17 @@ ${validActions}
 请只输出一个 JSON 对象:`;
 
   async function callOnce(prompt) {
-    const response = await fetch(baseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: LLM_MAX_TOKENS,
-        thinking: { type: 'adaptive' },
-        output_config: { effort: LLM_EFFORT_SIMPLE },
-        system: '你是德州扑克 GTO AI 玩家。严格按照 JSON 格式输出决策，不输出任何其他文字。',
-        messages: [
-          { role: 'user', content: prompt },
-          ...(systemPrompt && systemPrompt !== DEFAULT_SYSTEM_PROMPT ? [{ role: 'assistant', content: ' ' }] : [])
-        ]
-      })
+    const messages = [{ role: 'user', content: prompt }];
+    // MiniMax 在自定义系统提示词下偶发空回复，用 assistant 前缀续写规避
+    if (provider === 'minimax' && systemPrompt && systemPrompt !== DEFAULT_SYSTEM_PROMPT) {
+      messages.push({ role: 'assistant', content: ' ' });
+    }
+    const { text } = await llmRequest({
+      messages,
+      system: '你是德州扑克 GTO AI 玩家。严格按照 JSON 格式输出决策，不输出任何其他文字。',
+      effort: LLM_EFFORT_SIMPLE
     });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    const data = await response.json();
-    // 聚合所有 text 块（thinking 模式下可能多个 text 块混合在 thinking 之间）
-    const textBlocks = (data.content || []).filter(c => c.type === 'text');
-    return textBlocks.map(c => c.text || '').join('');
+    return text;
   }
 
   let raw = '';
