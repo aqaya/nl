@@ -84,6 +84,9 @@
   - [NOTE] 新增位置时，同步更新 POS_DISPLAY / buildSeatRing /
           abPositionsFor / 6max-100bb 等 RANGE_DB 键值。
   - [NOTE] 修改默认 API key 时请尊重原作者意图，留空让用户自填。
+  - [NOTE] 自动对战的 contributed 是「本街」投入额（每街归零，用于跟注/收口
+          判断），totalContrib 是整手累计（边池分配和盈亏结算用它）。改跟注
+          金额语义时两者要同步，否则会出现「底池凭空增减」或街道永不收口。
 
 【贡献指南】
   1. 保持单文件结构，方便分享
@@ -8278,7 +8281,10 @@ function abStackBBFor(gameType) {
 const autoBattle = {
   gameType: '6max-100bb',
   userPos: null,
-  seats: [], // [{pos, isUser, stack, holeCards, folded, contributed, hasActed, lastAction, allIn}]
+  // seats: [{pos, isUser, stack, holeCards, folded, contributed, totalContrib, hasActed, lastAction, allIn}]
+  //   contributed  = 本街已投入的筹码（每街归零，用于跟注/收口判断）
+  //   totalContrib = 本手牌累计投入的筹码（跨街累加，用于边池分配和盈亏结算）
+  seats: [],
   board: [],
   pot: 0,
   highBet: 0, // current bet to match (preflop = BB; postflop = highest bet this street)
@@ -8374,6 +8380,7 @@ function abStartHand() {
       holeCards: [],
       folded: false,
       contributed: 0,
+      totalContrib: 0,
       hasActed: false,
       lastAction: null,
       allIn: false,
@@ -8391,8 +8398,8 @@ function abStartHand() {
   // Post blinds: SB 0.5BB, BB 1BB
   const sbSeat = autoBattle.seats.find(s => s.pos === 'sb');
   const bbSeat = autoBattle.seats.find(s => s.pos === 'bb');
-  if (sbSeat) { sbSeat.stack -= 0.5; sbSeat.contributed = 0.5; }
-  if (bbSeat) { bbSeat.stack -= 1; bbSeat.contributed = 1; }
+  if (sbSeat) { sbSeat.stack -= 0.5; sbSeat.contributed = 0.5; sbSeat.totalContrib = 0.5; }
+  if (bbSeat) { bbSeat.stack -= 1; bbSeat.contributed = 1; bbSeat.totalContrib = 1; }
   autoBattle.pot = 1.5;
   autoBattle.highBet = 1;
   autoBattle.minRaise = 1;
@@ -8498,7 +8505,7 @@ function abRenderScenarioInStage() {
       <div class="battle-card-title">当前场景</div>
       <div class="battle-card-body">
         <div><span class="label">游戏:</span><span class="value">${escapeHtml(gameLabel)}</span></div>
-        <div><span class="label">你的位置:</span><span class="value">${autoBattle.userPos.toUpperCase()}</span></div>
+        <div><span class="label">你的位置:</span><span class="value">${autoBattle.userPos ? autoBattle.userPos.toUpperCase() : '-'}</span></div>
         <div><span class="label">手牌:</span>${handDisplay || '(无)'}</div>
         <div><span class="label">公共牌:</span>${boardDisplay}</div>
         <div><span class="label">筹码:</span><span class="value">${Math.round(userStack?.stack || 0)} BB</span></div>
@@ -8715,6 +8722,7 @@ function abAdvanceStreet() {
   for (const s of autoBattle.seats) {
     if (!s.folded) {
       s.hasActed = false;
+      s.contributed = 0;  // 每街的跟注基准归零（totalContrib 保留整手累计）
     }
   }
   // Deal next street
@@ -8744,17 +8752,19 @@ function abAdvanceStreet() {
     abShowdown();
     return;
   }
-  // Set first actor postflop: first active player after SB
+  // Set first actor postflop: first active player after SB（跳过已全下的座位）
   const positions = abPositionsFor(autoBattle.gameType);
   const idx = positions.indexOf('sb');
   for (let i = 1; i <= positions.length; i++) {
     const pos = positions[(idx + i) % positions.length];
     const sIdx = autoBattle.seats.findIndex(s => s.pos === pos);
-    if (sIdx >= 0 && !autoBattle.seats[sIdx].folded) {
+    if (sIdx >= 0 && !autoBattle.seats[sIdx].folded && !autoBattle.seats[sIdx].allIn) {
       autoBattle.actorIdx = sIdx;
       break;
     }
   }
+  // 立即刷新按钮，否则换街到下一次 abRunNext 之间会残留上一街的行动按钮
+  abUpdateUI();
 }
 
 // Deal next street silently (used for all-in runout, no actor interaction)
@@ -8763,6 +8773,9 @@ function abAdvanceStreet() {
  * 不重置行动者，因为不再需要任何人行动
  */
 function abAdvanceStreetNoActor() {
+  for (const s of autoBattle.seats) {
+    if (!s.folded) s.contributed = 0;
+  }
   if (autoBattle.street === 'preflop') {
     autoBattle.deck.pop();
     autoBattle.board.push(autoBattle.deck.pop(), autoBattle.deck.pop(), autoBattle.deck.pop());
@@ -8790,34 +8803,40 @@ function abAdvanceStreetNoActor() {
 }
 
 /**
- * 把动作应用到座位：扣筹码、加 pot、更新 contributed/hasActed/allIn/highBet/minRaise，
+ * 把动作应用到座位：扣筹码、加 pot、更新 contributed/totalContrib/hasActed/allIn/highBet/minRaise，
  * 然后调用 abAdvanceActor 推进到下一位
+ *
+ * amount 语义（三种动作不一致，必须区分）：
+ *   call  = 本次追加投入的筹码数（增量，已由调用方算好）
+ *   raise/bet = 本街的目标总注额（total）
+ *   allin = 本街的目标总注额（= 剩余筹码 + 本街已投入）
  * @param {object} seat 座位对象
  * @param {{action:string, amount:number}} action 动作
  */
 function abApplyAction(seat, action) {
   const amt = action.amount || 0;
+  const payChips = (pay) => {
+    seat.stack -= pay;
+    seat.contributed += pay;
+    seat.totalContrib += pay;
+    autoBattle.pot += pay;
+    if (seat.stack === 0) seat.allIn = true;
+  };
   if (action.action === 'fold') {
     seat.folded = true;
   } else if (action.action === 'check') {
     // no chips
-  } else if (action.action === 'call' || action.action === 'raise' || action.action === 'bet') {
+  } else if (action.action === 'call') {
+    // amount 已是增量，直接投入（不能当成总额，否则 SB 会算出 0 差额而永远配不平）
+    payChips(Math.min(Math.max(amt, 0), seat.stack));
+  } else if (action.action === 'raise' || action.action === 'bet') {
     const need = amt - seat.contributed;
-    const pay = Math.min(need, seat.stack);
-    seat.stack -= pay;
-    seat.contributed += pay;
-    autoBattle.pot += pay;
-    if (seat.stack === 0) seat.allIn = true;
-    if (action.action === 'raise' || action.action === 'bet') {
-      const raiseSize = amt - autoBattle.highBet;
-      if (raiseSize > 0) autoBattle.minRaise = raiseSize;
-      autoBattle.highBet = amt;
-    }
+    payChips(Math.min(Math.max(need, 0), seat.stack));
+    const raiseSize = amt - autoBattle.highBet;
+    if (raiseSize > 0) autoBattle.minRaise = raiseSize;
+    autoBattle.highBet = amt;
   } else if (action.action === 'allin') {
-    const pay = Math.min(amt, seat.stack);
-    seat.stack -= pay;
-    seat.contributed += pay;
-    autoBattle.pot += pay;
+    payChips(Math.min(Math.max(amt, 0), seat.stack));
     seat.allIn = true;
     const raiseSize = amt - autoBattle.highBet;
     if (raiseSize > 0) autoBattle.minRaise = raiseSize;
@@ -8997,9 +9016,9 @@ async function abAskAI(seat) {
 
 其中 amount 字段：
 - fold / check：不填 amount 或填 0
-- call：填跟注总额
-- raise / bet：填「总注额」（不是加注额）。当前最高注 ${autoBattle.highBet.toFixed(1)}BB，最低加注到 ${minRaise.toFixed(1)}BB
-- allin：填全下总额
+- call：不用填 amount，系统会自动按需跟注额扣筹码
+- raise / bet：填「本街总注额」（不是加注额）。当前最高注 ${autoBattle.highBet.toFixed(1)}BB，最低加注到 ${minRaise.toFixed(1)}BB
+- allin：不用填 amount，系统会自动全下
 
 【你的牌局】
 位置: ${seat.pos.toUpperCase()}
@@ -9228,25 +9247,43 @@ function abEval5(cards) {
   return { cat, score, desc: `${labels[cat]} (${ranks.map(r => AB_RANK_ORDER[r]).join('')})` };
 }
 /**
+ * 牌数不足 5 张时的降级描述（目前只用于翻牌前：只有 2 张底牌）
+ * @param {string[]} cards 现有牌
+ * @returns {{cat:number, score:number, desc:string}}
+ */
+function _abPartialHandDesc(cards) {
+  const order = AB_RANK_ORDER;
+  const rs = cards.map(c => c[0].toUpperCase()).sort((a, b) => order.indexOf(b) - order.indexOf(a));
+  if (cards.length === 2) {
+    if (rs[0] === rs[1]) return { cat: 0, score: 0, desc: `对子 ${rs[0]}${rs[1]}` };
+    if (cards[0][1] === cards[1][1]) return { cat: 0, score: 0, desc: `同花 ${rs.join('')}` };
+    return { cat: 0, score: 0, desc: `高牌 ${rs.join('')}` };
+  }
+  return { cat: 0, score: 0, desc: `底牌 ${rs.join('')}` };
+}
+
+/**
  * 从 2 张手牌 + 最多 5 张公共牌（共 7 张）里枚举所有 5 张子集，返回牌型最高的一手
+ * 牌数不足 5 张（如翻牌前就结束的手牌）时返回降级描述，避免取到 undefined 牌
  * @param {string[]} hole 手牌 2 张
  * @param {string[]} board 公共牌 0-5 张
- * @returns {{cat:number, score:number, desc:string}|null}
+ * @returns {{cat:number, score:number, desc:string}}
  */
 function abBestHandFrom7(hole, board) {
-  const all = hole.concat(board);
+  const all = (hole || []).concat(board || []);
+  const n = all.length;
   let best = null;
-  // C(7,5) = 21 combinations across all 2^7 = 128 bitmasks
-  for (let i = 0; i < 128; i++) {
+  // 枚举 2^n 个位掩码，取出所有恰好 5 张的组合（n=7 时即 C(7,5)=21 种）
+  for (let i = 0; i < (1 << n); i++) {
     const c = [];
-    for (let j = 0; j < 7; j++) {
+    for (let j = 0; j < n; j++) {
       if (i & (1 << j)) c.push(all[j]);
     }
     if (c.length !== 5) continue;
     const e = abEval5(c);
     if (!best || e.score > best.score) best = e;
   }
-  return best;
+  return best || _abPartialHandDesc(all);
 }
 
 /**
@@ -9268,25 +9305,25 @@ function abShowdown() {
 
 /**
  * 计算一手牌的边池分配方案：
- *   1. 把所有不重复的贡献额（contributed）从小到大排序
- *   2. 每个层 L：把 "从上一层到 L" 这部分乘以"贡献 ≥ L 的人数"作为新一层底池
- *   3. 该层底池的合格赢家 = "贡献 ≥ L 且未弃牌"的位置
+ *   1. 把所有不重复的整手累计投入额（totalContrib）从小到大排序
+ *   2. 每个层 L：把 "从上一层到 L" 这部分乘以"投入 ≥ L 的人数"作为新一层底池
+ *   3. 该层底池的合格赢家 = "投入 ≥ L 且未弃牌"的位置
  *
  * 例：A=100、B=200、C=300 三人都到摊牌 → 3 池：300 (A+B+C) / 200 (B+C) / 100 (C)
  * 例：A=100 弃牌，B=100、C=300 到摊牌 → 2 池：200 (B+C，A 已弃不计入) / 200 (C)
  *
- * @param {Array} seats 座位数组，每项含 {pos, contributed, folded}
+ * @param {Array} seats 座位数组，每项含 {pos, totalContrib, folded}
  * @returns {Array<{amount:number, eligible:string[]}>}
  */
 function _calcBattleSidePots(seats) {
-  const sortedContribs = [...new Set(seats.map(s => s.contributed))].sort((a, b) => a - b);
+  const sortedContribs = [...new Set(seats.map(s => s.totalContrib))].sort((a, b) => a - b);
   const pots = [];
   let prev = 0;
   for (const lvl of sortedContribs) {
     if (lvl <= prev) continue;
     const tierDelta = lvl - prev;
-    const contributorsCount = seats.filter(s => s.contributed >= lvl).length;
-    const eligible = seats.filter(s => s.contributed >= lvl && !s.folded).map(s => s.pos);
+    const contributorsCount = seats.filter(s => s.totalContrib >= lvl).length;
+    const eligible = seats.filter(s => s.totalContrib >= lvl && !s.folded).map(s => s.pos);
     if (tierDelta > 0 && contributorsCount > 0 && eligible.length > 0) {
       pots.push({ amount: tierDelta * contributorsCount, eligible });
     }
@@ -9318,6 +9355,39 @@ function _calcBattleUserPayout(seats, winnerPositions, userPos) {
 }
 
 /**
+ * 把本手所有座位的手牌写进日志（手牌结束后复盘用）
+ * @param {string[]} winnerPositions 赢家位置 key 列表
+ * @param {string} title 日志标题，如 '━━━ 摊牌 ━━━'
+ */
+function abLogAllHands(winnerPositions, title) {
+  abLog(`<span class="street">${title}</span>`);
+  for (const s of autoBattle.seats) {
+    const cls = winnerPositions.includes(s.pos) ? 'win' : (s.folded ? 'fold' : 'info');
+    const hand = abBestHandFrom7(s.holeCards, autoBattle.board);
+    const who = s.isUser ? '你' : s.pos.toUpperCase();
+    abLog(`<span class="${cls}">${who}: ${abCardLabel(s.holeCards[0])} ${abCardLabel(s.holeCards[1])} → ${hand.desc}${s.folded ? ' (弃牌)' : ''}</span>`);
+  }
+}
+
+/**
+ * 生成「本手所有座位的手牌」HTML（用于手牌结束后的复盘）：
+ * 全部座位都亮出底牌，弃牌者标灰并标注「弃牌」
+ * @param {string[]} winnerPositions 赢家位置 key 列表
+ * @returns {string}
+ */
+function abAllHandsHtml(winnerPositions) {
+  return autoBattle.seats.map(s => {
+    const who = s.isUser ? '你' : s.pos.toUpperCase();
+    const winner = winnerPositions.includes(s.pos);
+    const hand = abBestHandFrom7(s.holeCards, autoBattle.board);
+    if (s.folded) {
+      return `<div style="color:#636e72">${who}: ${abCardChipsHtml(s.holeCards)} <i>(弃牌)</i> → ${hand.desc}</div>`;
+    }
+    return `<div style="color:${winner ? '#ffeaa7' : '#b2bec3'}">${who}: ${abCardChipsHtml(s.holeCards)} → <b>${hand.desc}</b>${winner ? ' 🏆' : ''}</div>`;
+  }).join('');
+}
+
+/**
  * 一手结束：更新 stats、累计 net、写日志、显示结果卡、重新启用开始/再来按钮
  * @param {string[]} winnerPositions 赢家位置 key 列表（多人平分底池）
  * @param {string} reason 结束原因，如 'showdown'、'user_folded'、'其他人都弃牌'
@@ -9327,27 +9397,28 @@ function abEndHand(winnerPositions, reason) {
   autoBattle.active = false;
   const userSeat = autoBattle.seats.find(s => s.isUser);
   const userWon = winnerPositions.includes(userSeat.pos);
-  // 真正的边池分配：每人按 contributed 累计到自己的边池里，再按赢家摊牌排名分摊。
+  // 真正的边池分配：每人按 totalContrib（整手累计投入）归入自己的边池，再按赢家摊牌排名分摊。
   // 原实现是 "底池 / 赢家数" 平均分，忽略了有人 all-in 后只投了一部分的情况。
   const wonAmount = userWon
     ? _calcBattleUserPayout(autoBattle.seats, winnerPositions, userSeat.pos)
     : 0;
-  const net = userWon ? (wonAmount - userSeat.contributed) : -userSeat.contributed;
+  const net = userWon ? (wonAmount - userSeat.totalContrib) : -userSeat.totalContrib;
   if (userWon) autoBattle.stats.wins++;
   autoBattle.stats.hands++;
   autoBattle.stats.net += net;
 
   if (reason === 'user_folded') {
-    // 用户弃牌：不展示 AI 手牌（AI 没摊牌），只显示用户亏损
-    abLog(`<span class="info">你已弃牌，本手结束。损失 ${userSeat.contributed.toFixed(1)} BB。</span>`);
+    // 用户弃牌：手牌已结束，亮出所有座位的手牌供复盘
+    abLog(`<span class="info">你已弃牌，本手结束。损失 ${userSeat.totalContrib.toFixed(1)} BB。</span>`);
     const netTxt = `${net.toFixed(1)}`;
     abLog(`<span class="win">❌ 你 | 底池 ${autoBattle.pot.toFixed(1)} BB | 你的盈亏: ${netTxt} BB</span>`);
+    abLogAllHands(winnerPositions, '━━━ 本手手牌 ━━━');
 
     const result = document.getElementById('abResult');
     result.style.display = 'block';
     result.innerHTML = `
       <div><b>本手结果</b> · 盈亏 <span style="color:#ff7675;">${netTxt} BB</span>（弃牌）</div>
-      <div>你: <i>(弃牌)</i></div>
+      ${abAllHandsHtml(winnerPositions)}
     `;
     abUpdateUI();
     document.getElementById('abAgainBtn').disabled = false;
@@ -9356,17 +9427,10 @@ function abEndHand(winnerPositions, reason) {
   }
 
   if (reason === 'showdown') {
-    abLog(`<span class="street">━━━ 摊牌 ━━━</span>`);
-    for (const s of autoBattle.seats) {
-      if (!s.folded) {
-        const cls = winnerPositions.includes(s.pos) ? 'win' : 'fold';
-        const hand = abBestHandFrom7(s.holeCards, autoBattle.board);
-        const who = s.isUser ? '你' : s.pos.toUpperCase();
-        abLog(`<span class="${cls}">${who}: ${abCardLabel(s.holeCards[0])} ${abCardLabel(s.holeCards[1])} → ${hand.desc}</span>`);
-      }
-    }
+    abLogAllHands(winnerPositions, '━━━ 摊牌 ━━━');
   } else {
     abLog(`<span class="info">${reason}</span>`);
+    abLogAllHands(winnerPositions, '━━━ 本手手牌 ━━━');
   }
   const winnerNames = winnerPositions.map(p => {
     const s = autoBattle.seats.find(x => x.pos === p);
@@ -9378,16 +9442,9 @@ function abEndHand(winnerPositions, reason) {
   // Update result block
   const result = document.getElementById('abResult');
   result.style.display = 'block';
-  const showHands = autoBattle.seats.map(s => {
-    const who = s.isUser ? '你' : s.pos.toUpperCase();
-    if (s.folded) return `<div>${who}: <i>(弃牌)</i></div>`;
-    const hand = abBestHandFrom7(s.holeCards, autoBattle.board);
-    const winner = winnerPositions.includes(s.pos);
-    return `<div style="color:${winner ? '#ffeaa7' : '#b2bec3'}">${who}: ${abCardChipsHtml(s.holeCards)} → <b>${hand.desc}</b>${winner ? ' 🏆' : ''}</div>`;
-  }).join('');
   result.innerHTML = `
     <div><b>本手结果</b> · 盈亏 <span style="color:${net>=0?'#00b894':'#ff7675'}">${netTxt} BB</span></div>
-    ${showHands}
+    ${abAllHandsHtml(winnerPositions)}
   `;
 
   abUpdateUI();
